@@ -277,6 +277,43 @@ func TestHandleEvents_InvalidJSON(t *testing.T) {
 	}
 }
 
+// H-01: POST /v1/events に 64KiB 超のボディを送ると 413 request_too_large
+func TestHandleEvents_BodyTooLarge(t *testing.T) {
+	t.Parallel()
+	cb := &CaptureBus{}
+	ctx := context.Background()
+	srv := newHooksTestServer(t, cb, ctx)
+	defer srv.Close()
+
+	// 65KiB の JSON ペイロード (Body フィールドが大きい)
+	bigBody := bytes.Repeat([]byte("a"), 65*1024)
+	payload := map[string]string{"kind": "Stop", "title": "t", "body": string(bigBody)}
+	buf, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/events", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+hooksToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("HTTP リクエスト失敗: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status: got %d, want 413", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	errObj, _ := result["error"].(map[string]interface{})
+	if errObj["code"] != "request_too_large" {
+		t.Errorf("error code: got %q, want \"request_too_large\"", errObj["code"])
+	}
+	if len(cb.Published) != 0 {
+		t.Errorf("Bus に Publish されてはいけない: got %d events", len(cb.Published))
+	}
+}
+
 // T-030: 未知の Kind → 400 invalid_kind
 func TestHandleEvents_UnknownKind(t *testing.T) {
 	t.Parallel()

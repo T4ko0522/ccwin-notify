@@ -344,6 +344,51 @@ func TestHandleTest_InvalidJSON(t *testing.T) {
 	}
 }
 
+// H-01: HandleTest — 64KiB 超のボディを送ると 413 request_too_large
+func TestHandleTest_BodyTooLarge(t *testing.T) {
+	t.Parallel()
+
+	bus := newTestBus()
+	hub := newTestSSEHub()
+	defer hub.Close()
+	acceptCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fakeN := notifier.NewFakeNotifier("toast")
+	d := daemon.NewDispatcher(acceptCtx, bus, []notifier.Notifier{fakeN}, hub, testDispatcherCfg, testLogger)
+	go d.Run()
+	defer func() {
+		_ = bus.Close(context.Background())
+		c, c2 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer c2()
+		_ = d.Close(c)
+	}()
+
+	cfg := defaultTestConfig()
+	handler := daemon.HandleTest(d, []notifier.Notifier{fakeN}, cfg.Notifiers)
+
+	// 65KiB の body フィールドを含む JSON
+	bigBody := bytes.Repeat([]byte("a"), 65*1024)
+	payload := map[string]string{"kind": "Stop", "target_notifier": "all", "body": string(bigBody)}
+	buf, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/v1/test", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status: got %d, want 413 (body=%s)", w.Code, w.Body.String())
+	}
+	var errResp map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err == nil {
+		if errObj, ok := errResp["error"].(map[string]interface{}); ok {
+			if code := errObj["code"]; code != "request_too_large" {
+				t.Errorf("error.code: got %v, want \"request_too_large\"", code)
+			}
+		}
+	}
+}
+
 // T-090 / D-35: HandleTest 未知Kind → 400 invalid_kind
 func TestHandleTest_InvalidKind(t *testing.T) {
 	t.Parallel()

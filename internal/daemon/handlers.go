@@ -17,6 +17,9 @@ import (
 
 const version = "0.1.0"
 
+// maxRequestBodyBytes は POST 系ハンドラのリクエストボディ上限 (DoS 対策)。
+const maxRequestBodyBytes = 64 * 1024
+
 // HandleHealthz は GET /v1/healthz ハンドラ (認証不要)。
 func HandleHealthz(startedAt time.Time, v string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +120,13 @@ func HandleTest(d *Dispatcher, notifiers []notifier.Notifier, notifiersCfg confi
 			Title          string          `json:"title"`
 			Body           string          `json:"body"`
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeJSONErr(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds 64KiB")
+				return
+			}
 			writeJSONErr(w, http.StatusBadRequest, "invalid_json", err.Error())
 			return
 		}

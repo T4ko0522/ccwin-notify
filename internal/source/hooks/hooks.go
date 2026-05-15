@@ -13,6 +13,9 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/ipc/sse"
 )
 
+// maxRequestBodyBytes は POST /v1/events のリクエストボディ上限 (DoS 対策)。
+const maxRequestBodyBytes = 64 * 1024
+
 // eventRequest は POST /v1/events のリクエストボディ。
 // Source フィールドは受け付けない — サーバー側で "hooks" を強制する (MUST 7 / B3R-02)。
 type eventRequest struct {
@@ -33,8 +36,14 @@ func HandleEvents(bus event.EventSink, acceptCtx context.Context, expectedHash [
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 		var req eventRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeJSONError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds 64KiB")
+				return
+			}
 			writeJSONError(w, http.StatusBadRequest, "invalid_json", err.Error())
 			return
 		}
