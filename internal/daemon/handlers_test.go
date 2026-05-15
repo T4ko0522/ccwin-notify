@@ -302,6 +302,62 @@ func TestHandleTest_OK(t *testing.T) {
 	}
 }
 
+// H-04 / D-40: target_notifier="toast" 指定で webhook 系 Notifier は呼ばれない
+func TestHandleTest_TargetNotifier_FiltersOutOthers(t *testing.T) {
+	t.Parallel()
+
+	bus := newTestBus()
+	hub := newTestSSEHub()
+	defer hub.Close()
+	acceptCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	toastN := notifier.NewFakeNotifier("toast")
+	webhookN := notifier.NewFakeNotifier("webhook.discord")
+	notifiers := []notifier.Notifier{toastN, webhookN}
+	d := daemon.NewDispatcher(acceptCtx, bus, notifiers, hub, testDispatcherCfg, testLogger)
+	go d.Run()
+	defer func() {
+		_ = bus.Close(context.Background())
+		c, c2 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer c2()
+		_ = d.Close(c)
+	}()
+
+	cfg := defaultTestConfig()
+	// webhook.discord も Enabled にしておく (kind_mask 一致確認用)
+	cfg.Notifiers.Webhook.Discord.Enabled = true
+	cfg.Notifiers.Webhook.Discord.URL = "https://example.com/webhook"
+	handler := daemon.HandleTest(d, notifiers, cfg.Notifiers)
+
+	body, _ := json.Marshal(apiclient.TestRequest{
+		Kind:           event.KindStop,
+		TargetNotifier: "toast",
+		Title:          "t",
+		Body:           "b",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/test", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200 (body=%s)", w.Code, w.Body.String())
+	}
+
+	if got := toastN.Len(); got != 1 {
+		t.Errorf("toast.Notify count: got %d, want 1", got)
+	}
+	if got := webhookN.Len(); got != 0 {
+		t.Errorf("webhook.discord.Notify count: got %d, want 0 (target='toast' で除外されるべき)", got)
+	}
+
+	var result apiclient.TestResult
+	_ = json.NewDecoder(w.Body).Decode(&result)
+	if len(result.Results) != 1 || result.Results[0].Notifier != "toast" {
+		t.Errorf("results: got %+v, want 1 件 (toast のみ)", result.Results)
+	}
+}
+
 // T-089 / D-35: HandleTest 不正JSON → 400 invalid_json
 func TestHandleTest_InvalidJSON(t *testing.T) {
 	t.Parallel()

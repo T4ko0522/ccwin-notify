@@ -156,7 +156,7 @@ func HandleTest(d *Dispatcher, notifiers []notifier.Notifier, notifiersCfg confi
 			}
 		}
 
-		out, err := d.SubmitAndCollect(ev)
+		out, err := d.SubmitAndCollectTargeted(ev, req.TargetNotifier)
 		if err != nil {
 			if errors.Is(err, ErrDispatcherClosing) {
 				writeJSONErr(w, http.StatusServiceUnavailable, "shutting_down", "daemon is shutting down")

@@ -105,7 +105,7 @@ func (d *Dispatcher) Run() {
 			Payload: ev,
 		})
 		// fromBus=true: acceptCtx キャンセル後でも drain できるようゲートをスキップ (B3R-02 修正)
-		if _, err := d.submit(ev, false, true); err != nil {
+		if _, err := d.submit(ev, false, true, nil); err != nil {
 			d.logger.Warn("Dispatcher.Run: submit failed", "err", err, "event_id", ev.ID)
 		}
 	}
@@ -113,14 +113,37 @@ func (d *Dispatcher) Run() {
 
 // Submit は通常経路の非同期発火。
 func (d *Dispatcher) Submit(ev event.Event) error {
-	_, err := d.submit(ev, false, false)
+	_, err := d.submit(ev, false, false, nil)
 	return err
 }
 
 // SubmitAndCollect は POST /v1/test 専用。out chan は必ず close される。
+// target_notifier に応じて Notifier をフィルタしたい場合は SubmitAndCollectTargeted を使う。
 func (d *Dispatcher) SubmitAndCollect(ev event.Event) (<-chan sse.DispatchResult, error) {
-	out, err := d.submit(ev, true, false)
-	return out, err
+	return d.submit(ev, true, false, nil)
+}
+
+// SubmitAndCollectTargeted は POST /v1/test 用 (D-40 / H-04)。
+// target が "" or "all" → 全 Notifier に fan-out (SubmitAndCollect と同じ)。
+// 特定名 → 一致する Notifier のみ dispatch する。一致しない場合は空 out を即 close する
+// (handler 側が事前に 409 で弾く前提)。
+func (d *Dispatcher) SubmitAndCollectTargeted(ev event.Event, target string) (<-chan sse.DispatchResult, error) {
+	if target == "" || target == "all" {
+		return d.submit(ev, true, false, nil)
+	}
+	var picked []notifier.Notifier
+	for _, n := range d.notifiers {
+		if n.Name() == target {
+			picked = append(picked, n)
+			break
+		}
+	}
+	if len(picked) == 0 {
+		out := make(chan sse.DispatchResult)
+		close(out)
+		return out, nil
+	}
+	return d.submit(ev, true, false, picked)
 }
 
 // submit は fan-out ロジックの共通実装。
@@ -138,11 +161,16 @@ func (d *Dispatcher) SubmitAndCollect(ev event.Event) (<-chan sse.DispatchResult
 // deadlock 回避 (MUST dispatcher-submit-blocks-under-closingmu):
 // closingMu 配下では closing チェックと wg.Add のみ行い、ロック解放後に
 // goroutine 内で sem を取得する。sem 取得待ちで Close() の closingMu 取得をブロックしない。
-func (d *Dispatcher) submit(ev event.Event, collect bool, fromBus bool) (<-chan sse.DispatchResult, error) {
+func (d *Dispatcher) submit(ev event.Event, collect bool, fromBus bool, notifiersOverride []notifier.Notifier) (<-chan sse.DispatchResult, error) {
+	// 対象 Notifier (target_notifier 指定時は呼び出し側で絞ったものを受け取る)
+	notifiers := d.notifiers
+	if notifiersOverride != nil {
+		notifiers = notifiersOverride
+	}
 	// filterFor: Notifier を wanted / filtered に分類する
-	wanted := make([]notifier.Notifier, 0, len(d.notifiers))
-	filtered := make([]notifier.Notifier, 0, len(d.notifiers))
-	for _, n := range d.notifiers {
+	wanted := make([]notifier.Notifier, 0, len(notifiers))
+	filtered := make([]notifier.Notifier, 0, len(notifiers))
+	for _, n := range notifiers {
 		if n.Wants(ev.Kind) {
 			wanted = append(wanted, n)
 		} else {
@@ -158,7 +186,7 @@ func (d *Dispatcher) submit(ev event.Event, collect bool, fromBus bool) (<-chan 
 
 	if collect {
 		// out buffer = 全 Notifier 数 (wanted + filtered)
-		out = make(chan sse.DispatchResult, len(d.notifiers)+1)
+		out = make(chan sse.DispatchResult, len(notifiers)+1)
 		callWG = &sync.WaitGroup{}
 		resultFn = func(r sse.DispatchResult) {
 			out <- r
