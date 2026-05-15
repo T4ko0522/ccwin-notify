@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: go build (windows-amd64)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go build
+        run: go build -v -trimpath -o ./bin/ccwin-notify.exe ./cmd/ccwin-notify
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccwin-notify-windows-amd64
+          path: ./bin/ccwin-notify.exe
+          if-no-files-found: error
+          retention-days: 7
