@@ -37,7 +37,13 @@ func LoadOrCreate(ctx context.Context, path string) (Token, error) {
 	}
 
 	// 既存ファイルを読込 — 末尾改行等を除去してから使用 (M3R-04: daemon/client 両方で TrimSpace)
-	tok := Token(secret.SecretString(strings.TrimSpace(string(data))))
+	tokStr := strings.TrimSpace(string(data))
+	if err := validateTokenFormat(tokStr); err != nil {
+		// M-05: 弱い token (短い / charset 違反) は fail-closed。ユーザーは secret.token を
+		// 削除して再生成させること。
+		return "", fmt.Errorf("auth: token format invalid (delete %q to regenerate): %w", path, err)
+	}
+	tok := Token(secret.SecretString(tokStr))
 	// DACL を検証 — drift 検出時のみ修復し、修復後に再検証して失敗なら fail-closed (H-02)
 	drift, reason, verifyErr := verifyFileACL(path)
 	if verifyErr != nil {
@@ -128,6 +134,22 @@ func applyFileACL(path string) error {
 		return fmt.Errorf("auth: SetNamedSecurityInfo: %w", err)
 	}
 
+	return nil
+}
+
+// validateTokenFormat は token が base64url charset で >= 32 byte (=43 chars) decode 可能か確認する (M-05)。
+// 弱い (短い・charset 違反の) token を起動時に弾き、Bearer 認証強度を保証する。
+func validateTokenFormat(tok string) error {
+	if tok == "" {
+		return fmt.Errorf("token is empty")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(tok)
+	if err != nil {
+		return fmt.Errorf("token is not valid base64url: %w", err)
+	}
+	if len(raw) < 32 {
+		return fmt.Errorf("token decoded to %d bytes, want >= 32", len(raw))
+	}
 	return nil
 }
 

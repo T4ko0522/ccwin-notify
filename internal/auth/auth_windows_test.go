@@ -84,6 +84,43 @@ func TestLoadOrCreate_TokenInFile(t *testing.T) {
 	}
 }
 
+// M-05: 弱い token (短い ASCII) を書き込んでおくと LoadOrCreate がエラーを返す
+func TestLoadOrCreate_ExistingToken_TooShort_FailsClosed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.token")
+
+	// 16 文字の弱い token (base64url charset だが decode しても < 32 bytes)
+	if err := os.WriteFile(path, []byte("aaaaaaaaaaaaaaaa"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := auth.LoadOrCreate(context.Background(), path)
+	if err == nil {
+		t.Fatal("短い token を受け付けてしまった (fail-closed されていない)")
+	}
+	if !strings.Contains(err.Error(), "token format invalid") {
+		t.Errorf("error message に \"token format invalid\" を含むべき: %v", err)
+	}
+}
+
+// M-05: base64url 違反の文字を含む token は拒否
+func TestLoadOrCreate_ExistingToken_BadCharset_FailsClosed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.token")
+
+	// "!@#$" 等の base64url 外文字を含む長め (43 char) のトークン
+	if err := os.WriteFile(path, []byte("!@#$%^&*()_+abcdefghijklmnopqrstuvwxyz12345"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := auth.LoadOrCreate(context.Background(), path)
+	if err == nil {
+		t.Fatal("不正 charset の token を受け付けてしまった")
+	}
+}
+
 // captureLogs は slog.Default() の出力を bytes.Buffer に切り替えて取得する。
 func captureLogs(t *testing.T) (*bytes.Buffer, func()) {
 	t.Helper()
