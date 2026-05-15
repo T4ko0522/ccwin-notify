@@ -19,16 +19,31 @@ func runDaemon(args []string) {
 		}
 	}
 
-	// M-04: デフォルト config パス利用時、Load より前に %APPDATA%/ccwin-notify
-	// の DACL を整える。これで config.toml が起動直前に他ユーザーに書き換え
-	// られた場合の改ざんリスクを下げる。--config <他パス> 指定時は呼び出し側
-	// の責任とみなしてスキップ。
+	// M-04: デフォルト config パス利用時、Load より前に
+	//   1) %APPDATA%/ccwin-notify (secret.token / daemon.port 保持)
+	//   2) config.toml の親ディレクトリ (~/.config/ccwin-notify/ 等)
+	// の DACL を整える。これで起動直前に他ユーザーに書き換えられた場合の改ざん
+	// リスクを下げ、Webhook URL 等の機微情報を含む config.toml を保護する。
+	// --config <他パス> 指定時は呼び出し側の責任とみなしてスキップ。
 	if configPath == "" {
 		if appdata := os.Getenv("APPDATA"); appdata != "" {
 			if err := auth.EnsureDirACL(filepath.Join(appdata, "ccwin-notify")); err != nil {
 				fmt.Fprintf(os.Stderr, "ACL preflight error: %v\n", err)
 				os.Exit(4)
 			}
+		}
+		if configDir := filepath.Dir(config.DefaultPath()); configDir != "" && configDir != "." {
+			if err := auth.EnsureDirACL(configDir); err != nil {
+				fmt.Fprintf(os.Stderr, "config ACL preflight error: %v\n", err)
+				os.Exit(4)
+			}
+		}
+		// 親ディレクトリ DACL 確立後に config.toml が無ければ defaultConfig を
+		// 書き出す。これによりユーザーが `ccwin init` を実行しなくても
+		// config.toml は常に存在する状態になる。
+		if err := config.EnsureExists(""); err != nil {
+			fmt.Fprintf(os.Stderr, "config bootstrap error: %v\n", err)
+			os.Exit(2)
 		}
 	}
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -11,25 +10,21 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/config"
 )
 
-// runInitWith をスクリプト入力で呼び出し、出力先 TOML を Load + Validate で検証する。
-func runInitForTest(t *testing.T, args []string, input string) (stdout, stderr string, exit int) {
+// runInitForTest は runInitWith をテスト用に呼び出して exit code と出力を返す。
+func runInitForTest(t *testing.T, args []string) (stdout, stderr string, exit int) {
 	t.Helper()
-	in := bufio.NewReader(strings.NewReader(input))
 	var out, errBuf bytes.Buffer
-	exit = runInitWith(args, initIO{in: in, out: &out, errOut: &errBuf})
+	exit = runInitWith(args, initIO{out: &out, errOut: &errBuf})
 	return out.String(), errBuf.String(), exit
 }
 
+// 何もフラグを渡さなければデフォルト設定の TOML が書き出され、Validate を通過する。
 func TestInit_NewFile_AllDefaults(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	// 全項目で Enter (デフォルト) を打つ。Discord/Slack は default false なのでスキップされる。
-	// 順番: log_level, toast, sound, discord, slack
-	input := strings.Repeat("\n", 5)
-
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, input)
+	stdout, stderr, exit := runInitForTest(t, []string{"--path", path})
 	if exit != 0 {
 		t.Fatalf("exit=%d stderr=%q stdout=%q", exit, stderr, stdout)
 	}
@@ -48,31 +43,26 @@ func TestInit_NewFile_AllDefaults(t *testing.T) {
 		t.Errorf("LogLevel: got %q want info", cfg.LogLevel)
 	}
 	if !cfg.Notifiers.Toast.Enabled {
-		t.Error("Toast enabled であるべき")
+		t.Error("Toast はデフォルト enabled")
 	}
-	if cfg.Notifiers.Sound.Enabled {
-		t.Error("Sound はデフォルト disabled")
+	if !cfg.Notifiers.Sound.Enabled {
+		t.Error("Sound はデフォルト enabled")
 	}
 }
 
-func TestInit_SoundWithWavPath(t *testing.T) {
+// --log-level / --toast / --sound フラグが反映される。
+func TestInit_Flags_OverrideDefaults(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	wav := filepath.Join(dir, "notify.wav")
 
-	// log_level=warn, toast=Enter(default y), sound=y + wav path, discord=Enter(N), slack=Enter(N)
-	input := strings.Join([]string{
-		"warn",
-		"",
-		"y",
-		wav,
-		"",
-		"",
-		"",
-	}, "\n") + "\n"
-
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, input)
+	args := []string{
+		"--path", path,
+		"--log-level", "warn",
+		"--toast", "false",
+		"--sound", "false",
+	}
+	stdout, stderr, exit := runInitForTest(t, args)
 	if exit != 0 {
 		t.Fatalf("exit=%d stderr=%q stdout=%q", exit, stderr, stdout)
 	}
@@ -81,43 +71,27 @@ func TestInit_SoundWithWavPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
 	if cfg.LogLevel != "warn" {
 		t.Errorf("LogLevel: got %q want warn", cfg.LogLevel)
 	}
-	if !cfg.Notifiers.Sound.Enabled {
-		t.Error("Sound は enabled であるべき")
+	if cfg.Notifiers.Toast.Enabled {
+		t.Error("Toast: false 指定だが enabled のまま")
 	}
-	if cfg.Notifiers.Sound.WavPath != wav {
-		t.Errorf("WavPath: got %q want %q", cfg.Notifiers.Sound.WavPath, wav)
+	if cfg.Notifiers.Sound.Enabled {
+		t.Error("Sound: false 指定だが enabled のまま")
 	}
 }
 
-func TestInit_DiscordURL_RetryOnInvalid(t *testing.T) {
+// --discord-webhook で URL が設定され Discord が enabled になる。
+func TestInit_DiscordWebhook_SetsURLAndEnables(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	// log_level, toast, sound=n, discord=y, http URL (reject) -> https URL (accept), slack=n
-	input := strings.Join([]string{
-		"info",
-		"y",
-		"n",
-		"y",
-		"http://example.com/hook",
-		"https://discord.com/api/webhooks/abc/def",
-		"n",
-	}, "\n") + "\n"
-
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, input)
+	url := "https://discord.com/api/webhooks/abc/def"
+	stdout, stderr, exit := runInitForTest(t, []string{"--path", path, "--discord-webhook", url})
 	if exit != 0 {
 		t.Fatalf("exit=%d stderr=%q stdout=%q", exit, stderr, stdout)
-	}
-	if !strings.Contains(stdout, "https://") {
-		// プロンプトに「https://」を含む文字列が出ていることを軽く確認
-		t.Logf("stdout: %s", stdout)
 	}
 
 	cfg, err := config.Load(path)
@@ -128,132 +102,112 @@ func TestInit_DiscordURL_RetryOnInvalid(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 	if !cfg.Notifiers.Webhook.Discord.Enabled {
-		t.Error("Discord enabled")
+		t.Error("Discord: webhook URL 指定で enabled になっていない")
 	}
-	if got := cfg.Notifiers.Webhook.Discord.URL.Reveal(); got != "https://discord.com/api/webhooks/abc/def" {
-		t.Errorf("Discord URL: got %q", got)
+	if got := cfg.Notifiers.Webhook.Discord.URL.Reveal(); got != url {
+		t.Errorf("Discord URL: got %q want %q", got, url)
 	}
 }
 
-func TestInit_DiscordURL_RejectsLoopbackIP(t *testing.T) {
+// http:// 等の不正な webhook URL は exit 1。
+func TestInit_DiscordWebhook_InvalidURL_Rejected(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	// loopback IP を最初に渡してリトライ → 正しい URL でパスすることを確認。
-	// 退行回避: ウィザードが config.Validate() より緩いと、ここで通過 → 最終 Validate で
-	// exit 1 になりユーザーの全入力が捨てられる。
-	input := strings.Join([]string{
-		"info",
-		"y",
-		"n",
-		"y",
-		"https://127.0.0.1/hook",
-		"https://discord.com/api/webhooks/abc/def",
-		"n",
-	}, "\n") + "\n"
-
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, input)
-	if exit != 0 {
-		t.Fatalf("exit=%d stderr=%q stdout=%q", exit, stderr, stdout)
+	stdout, stderr, exit := runInitForTest(t, []string{
+		"--path", path,
+		"--discord-webhook", "http://example.com/hook",
+	})
+	if exit == 0 {
+		t.Fatalf("invalid URL なのに exit=0 stdout=%q", stdout)
 	}
-	if !strings.Contains(stdout, "loopback") {
-		t.Errorf("loopback 拒否メッセージが見えない: %q", stdout)
+	if !strings.Contains(stderr, "discord-webhook") {
+		t.Errorf("stderr に --discord-webhook の文脈が無い: %q", stderr)
+	}
+}
+
+// loopback IP の webhook URL は exit 1 (Config.Validate と判定一致)。
+func TestInit_DiscordWebhook_LoopbackRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	_, stderr, exit := runInitForTest(t, []string{
+		"--path", path,
+		"--discord-webhook", "https://127.0.0.1/hook",
+	})
+	if exit == 0 {
+		t.Fatal("loopback URL なのに exit=0")
+	}
+	if !strings.Contains(stderr, "loopback") {
+		t.Errorf("loopback 拒否メッセージが無い: %q", stderr)
+	}
+}
+
+// 既存ファイルがあり --force 無しなら exit 1 (TUI 廃止のため対話確認は無い)。
+func TestInit_ExistingFile_WithoutForce_Fails(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(path, []byte("log_level = \"debug\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	stdout, stderr, exit := runInitForTest(t, []string{"--path", path})
+	if exit == 0 {
+		t.Fatalf("既存ファイル + --force 無しなのに exit=0 stdout=%q", stdout)
+	}
+	if !strings.Contains(stderr, "--force") {
+		t.Errorf("stderr に --force の案内が無い: %q", stderr)
+	}
+
+	// 元ファイルが書き換わっていないこと
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), `log_level = "debug"`) {
+		t.Errorf("ファイルが書き換わっている: %q", string(data))
+	}
+}
+
+// --force があれば既存ファイルを上書きする。
+func TestInit_ExistingFile_WithForce_Overwrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(path, []byte("log_level = \"debug\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, stderr, exit := runInitForTest(t, []string{"--path", path, "--force"})
+	if exit != 0 {
+		t.Fatalf("--force でも書き出し失敗: exit=%d stderr=%q", exit, stderr)
 	}
 
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if got := cfg.Notifiers.Webhook.Discord.URL.Reveal(); got != "https://discord.com/api/webhooks/abc/def" {
-		t.Errorf("Discord URL: got %q", got)
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel: got %q want info (defaultConfig で上書きされていない)", cfg.LogLevel)
 	}
 }
 
-func TestInit_ExistingFile_DeclineOverwrite(t *testing.T) {
+// --log-level の値が defaultConfig の許容外なら Validate で弾かれて exit 1。
+func TestInit_InvalidLogLevel_RejectedByValidate(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	// 事前にダミーファイルを置く
-	if err := writeFile(path, "log_level = \"debug\"\n"); err != nil {
-		t.Fatalf("seed: %v", err)
+	_, stderr, exit := runInitForTest(t, []string{"--path", path, "--log-level", "verbose"})
+	if exit == 0 {
+		t.Fatal("log_level=verbose なのに exit=0")
 	}
-
-	// 上書きプロンプトで "n"
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, "n\n")
-	if exit != 0 {
-		t.Fatalf("exit=%d stderr=%q", exit, stderr)
+	if !strings.Contains(stderr, "log_level") {
+		t.Errorf("stderr に log_level の文脈が無い: %q", stderr)
 	}
-	if !strings.Contains(stdout, "中止しました") {
-		t.Errorf("中止メッセージ無し: %q", stdout)
-	}
-
-	// 書き換わっていないこと
-	data, err := readFile(path)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if !strings.Contains(data, `log_level = "debug"`) {
-		t.Errorf("ファイルが書き換わっている: %q", data)
-	}
-}
-
-func TestInit_ForceFlag_SkipsConfirm(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-
-	if err := writeFile(path, "log_level = \"debug\"\n"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	// --force なので上書き確認は来ない。defaults 5 連発のみ。
-	input := strings.Repeat("\n", 5)
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path, "--force"}, input)
-	if exit != 0 {
-		t.Fatalf("exit=%d stderr=%q stdout=%q", exit, stderr, stdout)
-	}
-	if strings.Contains(stdout, "上書きしますか") {
-		t.Errorf("--force でも確認プロンプトが出た: %q", stdout)
-	}
-}
-
-func TestInit_InvalidChoice_Reprompts(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-
-	// log_level に "verbose" (無効) -> "info" を入れて成功させる。残りは default。
-	input := strings.Join([]string{
-		"verbose",
-		"info",
-		"",
-		"",
-		"",
-		"",
-	}, "\n") + "\n"
-
-	stdout, stderr, exit := runInitForTest(t, []string{"--path", path}, input)
-	if exit != 0 {
-		t.Fatalf("exit=%d stderr=%q", exit, stderr)
-	}
-	if !strings.Contains(stdout, `"verbose"`) {
-		t.Errorf("invalid choice の再プロンプトが見えない: %q", stdout)
-	}
-}
-
-func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o600)
-}
-
-func readFile(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }

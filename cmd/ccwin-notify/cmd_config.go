@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/t4ko0522/ccwin-notify/internal/config"
 )
@@ -30,12 +29,12 @@ func runConfig(args []string) {
 		}
 
 	case "path":
-		appdata := os.Getenv("APPDATA")
-		if appdata == "" {
-			fmt.Fprintln(os.Stderr, "config path: APPDATA not set")
+		p := config.DefaultPath()
+		if p == "" {
+			fmt.Fprintln(os.Stderr, "config path: ホームディレクトリが解決できません (XDG_CONFIG_HOME も USERPROFILE も未設定)")
 			os.Exit(1)
 		}
-		fmt.Println(filepath.Join(appdata, "ccwin-notify", "config.toml"))
+		fmt.Println(p)
 
 	default:
 		fmt.Fprintf(os.Stderr, "config: unknown subcommand %q (available: show | path)\n", args[0])
