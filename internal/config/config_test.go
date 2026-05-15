@@ -262,6 +262,52 @@ func TestConfig_Validate_Webhook_DisabledButInvalidURL_Rejected(t *testing.T) {
 	}
 }
 
+// M-07: Webhook URL の host が non-routable IP なら拒否
+func TestConfig_Validate_Webhook_NonRoutableHost_Rejected(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		url  string
+		want bool // true = エラー期待
+	}{
+		{"loopback IPv4", "https://127.0.0.1/webhook", true},
+		{"loopback IPv6", "https://[::1]/webhook", true},
+		{"private 10.x", "https://10.0.0.5/webhook", true},
+		{"private 192.168", "https://192.168.1.1/webhook", true},
+		{"private 172.16", "https://172.16.0.1/webhook", true},
+		{"link-local 169.254", "https://169.254.1.1/webhook", true},
+		{"unspecified 0.0.0.0", "https://0.0.0.0/webhook", true},
+		{"empty host (no //)", "https:///webhook", true},
+		{"http scheme", "http://example.com/webhook", true},
+		{"public domain", "https://example.com/webhook", false},
+		{"public IP", "https://1.1.1.1/webhook", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := config.Load("")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			cfg.Notifiers.Webhook.Discord.Enabled = false
+			cfg.Notifiers.Webhook.Discord.URL = secret.SecretString(tc.url)
+			err = cfg.Validate()
+			if tc.want && err == nil {
+				t.Errorf("url=%q: error 期待だが nil", tc.url)
+			}
+			if !tc.want && err != nil {
+				t.Errorf("url=%q: 成功期待だが %v", tc.url, err)
+			}
+			// 何があってもエラーメッセージに URL 平文を含まない (H-03)
+			if err != nil && strings.Contains(err.Error(), tc.url) {
+				t.Errorf("error が URL 平文 %q を含む", tc.url)
+			}
+		})
+	}
+}
+
 // H-03: Webhook URL 不正のエラーメッセージに URL 平文が含まれない (I4)
 func TestConfig_Validate_Webhook_InvalidURL_DoesNotLeakURL(t *testing.T) {
 	t.Parallel()

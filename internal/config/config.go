@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -280,10 +280,27 @@ func (c *Config) Validate() error {
 func validateWebhookEndpoint(ep WebhookEndpoint, name string) error {
 	raw := ep.URL.Reveal()
 
-	// URL が空でなければ HTTPS 検証 (enabled に関わらず)
+	// URL が空でなければ url.Parse + scheme/host/private-IP 検証 (M-07)
 	// URL 自体は平文露出させない (H-03 / I4)。エラーメッセージには name のみ含める。
-	if raw != "" && !strings.HasPrefix(raw, "https://") {
-		return fmt.Errorf("config: notifiers.webhook.%s.url must start with https:// (value redacted)", name)
+	if raw != "" {
+		u, perr := url.Parse(raw)
+		if perr != nil {
+			return fmt.Errorf("config: notifiers.webhook.%s.url is not a valid URL (value redacted)", name)
+		}
+		if u.Scheme != "https" {
+			return fmt.Errorf("config: notifiers.webhook.%s.url must use scheme https (value redacted)", name)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("config: notifiers.webhook.%s.url is missing host (value redacted)", name)
+		}
+		// Host が IP リテラルの場合 private / loopback / link-local / multicast / unspecified を拒否
+		hostname := u.Hostname()
+		if ip := net.ParseIP(hostname); ip != nil {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+				ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+				return fmt.Errorf("config: notifiers.webhook.%s.url host is a non-routable IP (value redacted)", name)
+			}
+		}
 	}
 
 	// enabled=true のとき URL は必須
