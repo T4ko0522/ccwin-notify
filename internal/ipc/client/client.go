@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+
+	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
 
 // PortfileContent は %APPDATA%/ccwin-notify/daemon.port の JSON スキーマ (§4.1 拡張版)。
@@ -43,8 +45,9 @@ func ReadPortfile(path string) (*PortfileContent, error) {
 }
 
 // NewHTTPClient は Bearer 付きの *http.Client を返すヘルパー。
-// apiclient が内部で利用する。
-func NewHTTPClient(token string) *http.Client {
+// apiclient が内部で利用する。token は SecretString として保持し、
+// Reveal() は RoundTrip の Header セット直前にだけ行う (M-02 / CWE-316)。
+func NewHTTPClient(token secret.SecretString) *http.Client {
 	return &http.Client{
 		Transport: &bearerTransport{
 			token: token,
@@ -54,13 +57,14 @@ func NewHTTPClient(token string) *http.Client {
 }
 
 type bearerTransport struct {
-	token string
+	token secret.SecretString
 	base  http.RoundTripper
 }
 
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Request をコピーしてヘッダを追加 (元の Request を変更しない)
 	clone := req.Clone(req.Context())
-	clone.Header.Set("Authorization", "Bearer "+t.token)
+	// Reveal はこの行に限定 — token を変数に取り出さない
+	clone.Header.Set("Authorization", "Bearer "+t.token.Reveal())
 	return t.base.RoundTrip(clone)
 }

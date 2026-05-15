@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/t4ko0522/ccwin-notify/internal/ipc/client"
+	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
 
 // T-137 / C2: ReadPortfile が正常な portfile を読み込む
@@ -131,7 +132,7 @@ func TestNewHTTPClient_AddsBearer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	hc := client.NewHTTPClient(token)
+	hc := client.NewHTTPClient(secret.SecretString(token))
 	resp, err := hc.Get(srv.URL)
 	if err != nil {
 		t.Fatalf("GET: %v", err)

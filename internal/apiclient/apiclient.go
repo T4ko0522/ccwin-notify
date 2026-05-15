@@ -107,9 +107,9 @@ type Client interface {
 }
 
 // client は Client の実装。
+// Bearer トークン自体は httpClient (bearerTransport 内) が SecretString として保持する。
 type client struct {
 	baseURL    string
-	token      string
 	httpClient *http.Client
 }
 
@@ -125,7 +125,8 @@ func New(portfilePath, tokenPath string) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apiclient: failed to read token: %w", err)
 	}
-	token := strings.TrimSpace(string(tokenData))
+	// 平文 string 変数を残さない (M-02 / CWE-316)。SecretString として httpClient に渡す。
+	token := secret.SecretString(strings.TrimSpace(string(tokenData)))
 
 	// PID が現存するかを確認
 	if !isPIDAlive(pf.PID) {
@@ -137,7 +138,6 @@ func New(portfilePath, tokenPath string) (Client, error) {
 
 	c := &client{
 		baseURL:    baseURL,
-		token:      token,
 		httpClient: httpClient,
 	}
 
