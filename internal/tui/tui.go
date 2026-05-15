@@ -12,6 +12,9 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/event"
 )
 
+// maxLines は m.lines の上限。長時間稼働でアンバウンド成長しないように先頭から切り捨てる (P-H-01)。
+const maxLines = 1024
+
 // eventArrivedMsg は SSE チャネルから Event を受信したときの tea.Msg。
 type eventArrivedMsg struct {
 	event.Event
@@ -71,6 +74,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			title: v.Title,
 			body:  v.Body,
 		})
+		// P-H-01: 上限を超えたら先頭を切り捨てる (新しいバッキング配列にコピー)
+		if len(m.lines) > maxLines {
+			trimmed := make([]logLine, maxLines)
+			copy(trimmed, m.lines[len(m.lines)-maxLines:])
+			m.lines = trimmed
+		}
 		// 次のイベントを待つ Cmd を返す
 		return m, WaitForEvent(m.eventCh)
 

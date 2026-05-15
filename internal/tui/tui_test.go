@@ -6,10 +6,35 @@ package tui_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/t4ko0522/ccwin-notify/internal/event"
 	"github.com/t4ko0522/ccwin-notify/internal/tui"
 )
+
+// P-H-01: m.lines が maxLines (1024) を超えたら先頭から切り捨てる
+func TestModel_Update_EventArrived_CapsAtMaxLines(t *testing.T) {
+	t.Parallel()
+	ev := event.Event{
+		Kind:      event.KindStop,
+		Title:     "t",
+		Body:      "b",
+		Timestamp: time.Now(),
+	}
+	ch := make(chan event.Event, 1)
+	model := tui.NewForTest(context.Background(), ch)
+
+	// maxLines (1024) + 10 件を投入 → 上限 1024 で頭打ち
+	const want = 1024
+	const overflow = 10
+	for i := 0; i < want+overflow; i++ {
+		next, _ := tui.SimulateEventArrived(model, ev)
+		model = next
+	}
+	if got := model.LogLineCount(); got != want {
+		t.Errorf("LogLineCount: got %d, want %d (maxLines)", got, want)
+	}
+}
 
 // T-070 / TUI-3: Model.Update(eventArrivedMsg{...}) でログ行数が1増える (純関数テスト)
 func TestModel_Update_EventArrived_IncreasesLogCount(t *testing.T) {
