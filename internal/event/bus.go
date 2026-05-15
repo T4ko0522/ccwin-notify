@@ -6,13 +6,17 @@ import (
 )
 
 // bus は Bus インターフェースの実装。
-// bounded queue + drop policy + ctx 対応 + single-consumer Subscribe。
+// 循環バッファ (固定長配列 + head/tail/count) で GC 圧を低減する (P-H-02)。
 type bus struct {
 	mu       sync.Mutex
 	notEmpty *sync.Cond
 	notFull  *sync.Cond
 
+	// buf は固定長 capacity の循環バッファ。slice の reslice は行わない。
 	buf      []Event
+	head     int // 次に取り出す位置
+	tail     int // 次に書き込む位置
+	count    int // 現在の要素数 (0..capacity)
 	capacity int
 	policy   DropPolicy
 
@@ -30,6 +34,7 @@ func NewBus(capacity int, policy DropPolicy) Bus {
 		capacity = 1
 	}
 	b := &bus{
+		buf:      make([]Event, capacity),
 		capacity: capacity,
 		policy:   policy,
 		subCh:    make(chan Event, capacity),
@@ -37,6 +42,37 @@ func NewBus(capacity int, policy DropPolicy) Bus {
 	b.notEmpty = sync.NewCond(&b.mu)
 	b.notFull = sync.NewCond(&b.mu)
 	return b
+}
+
+// pushLocked は b.mu 保持下で循環バッファに e を追加する。
+// count < capacity 前提 (呼び出し側が drop 判定を済ませていること)。
+func (b *bus) pushLocked(e Event) {
+	b.buf[b.tail] = e
+	b.tail = (b.tail + 1) % b.capacity
+	b.count++
+}
+
+// pushDropOldestLocked は b.mu 保持下で循環バッファに e を追加する。
+// 満杯のときは head を進めて最古要素を捨てる (DropOldest)。
+func (b *bus) pushDropOldestLocked(e Event) {
+	if b.count == b.capacity {
+		// 最古要素を上書きしつつ head を進める
+		b.buf[b.tail] = e
+		b.tail = (b.tail + 1) % b.capacity
+		b.head = (b.head + 1) % b.capacity
+		return
+	}
+	b.pushLocked(e)
+}
+
+// popLocked は b.mu 保持下で最古要素を取り出す。count > 0 前提。
+// 取り出したスロットは zero 値でクリアし、Event 内のポインタを GC 可能にする。
+func (b *bus) popLocked() Event {
+	e := b.buf[b.head]
+	b.buf[b.head] = Event{} // GC 可能化
+	b.head = (b.head + 1) % b.capacity
+	b.count--
+	return e
 }
 
 // Publish は Event をキューに追加する。
@@ -50,23 +86,20 @@ func (b *bus) Publish(ctx context.Context, e Event) error {
 
 	switch b.policy {
 	case DropOldest:
-		if len(b.buf) >= b.capacity {
-			b.buf = b.buf[1:]
-		}
-		b.buf = append(b.buf, e)
+		b.pushDropOldestLocked(e)
 		b.notEmpty.Signal()
 		return nil
 
 	case DropNewest:
-		if len(b.buf) >= b.capacity {
+		if b.count >= b.capacity {
 			return ErrDropped
 		}
-		b.buf = append(b.buf, e)
+		b.pushLocked(e)
 		b.notEmpty.Signal()
 		return nil
 
 	case DropBlock:
-		for len(b.buf) >= b.capacity && !b.closed {
+		for b.count >= b.capacity && !b.closed {
 			// ctx のキャンセルを監視しながら待機
 			b.mu.Unlock()
 			select {
@@ -75,7 +108,7 @@ func (b *bus) Publish(ctx context.Context, e Event) error {
 				return ErrPublishCanceled
 			default:
 				b.mu.Lock()
-				if len(b.buf) < b.capacity || b.closed {
+				if b.count < b.capacity || b.closed {
 					break
 				}
 				// まだフル: goroutine で ctx.Done 監視しながら cond.Wait
@@ -100,7 +133,7 @@ func (b *bus) Publish(ctx context.Context, e Event) error {
 		if ctx.Err() != nil {
 			return ErrPublishCanceled
 		}
-		b.buf = append(b.buf, e)
+		b.pushLocked(e)
 		b.notEmpty.Signal()
 		return nil
 	}
@@ -133,17 +166,16 @@ func (b *bus) Subscribe() <-chan Event {
 func (b *bus) drainLoop() {
 	for {
 		b.mu.Lock()
-		for len(b.buf) == 0 && !b.closed {
+		for b.count == 0 && !b.closed {
 			b.notEmpty.Wait()
 		}
-		if len(b.buf) == 0 {
+		if b.count == 0 {
 			// closed かつ buf 空 = 終了
 			b.mu.Unlock()
 			close(b.subCh)
 			return
 		}
-		ev := b.buf[0]
-		b.buf = b.buf[1:]
+		ev := b.popLocked()
 		b.notFull.Signal()
 		b.mu.Unlock()
 

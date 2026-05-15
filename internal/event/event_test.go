@@ -98,6 +98,47 @@ func TestSentinelErrors(t *testing.T) {
 }
 
 // T-013: DropOldest ポリシー — capacity=2 に 3 件 Publish → 先頭が破棄されて nil が返る
+// P-H-02: 循環バッファが wrap-around 後も正しく先入れ先出しを保つ
+func TestBus_CircularBuffer_WrapAround(t *testing.T) {
+	t.Parallel()
+	bus := event.NewBus(3, event.DropOldest)
+	ctx := context.Background()
+	ch := bus.Subscribe()
+
+	// capacity=3 を超える 10 件を順次 publish → drain
+	// publish と subscribe が並行に回るため、head/tail が複数回 wrap してもデータ順序を保つ。
+	want := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		title := "ev" + string(rune('0'+i))
+		want = append(want, title)
+		if err := bus.Publish(ctx, event.Event{Kind: event.KindStop, Title: title}); err != nil {
+			t.Fatalf("Publish %d: %v", i, err)
+		}
+	}
+	// Close で drain 完了を待つ
+	closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := bus.Close(closeCtx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got := []string{}
+	for ev := range ch {
+		got = append(got, ev.Title)
+	}
+	// 順序は保たれている (Subscribe 即時 drain なので drop は発生しない可能性がある)
+	if len(got) == 0 {
+		t.Fatal("got nothing")
+	}
+	// 末尾の want と一致する suffix を持つ
+	tail := want[len(want)-len(got):]
+	for i := range got {
+		if got[i] != tail[i] {
+			t.Errorf("got[%d]=%q, want %q", i, got[i], tail[i])
+		}
+	}
+}
+
 func TestBus_DropOldest(t *testing.T) {
 	t.Parallel()
 	bus := event.NewBus(2, event.DropOldest)
