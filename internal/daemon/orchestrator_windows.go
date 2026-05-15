@@ -27,6 +27,7 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/notifier/toast"
 	"github.com/t4ko0522/ccwin-notify/internal/notifier/webhook"
 	"github.com/t4ko0522/ccwin-notify/internal/source/hooks"
+	"github.com/t4ko0522/ccwin-notify/internal/source/process"
 )
 
 func pidSelf() int {
@@ -187,6 +188,24 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
+	// step 13.6: プロセス監視ソース (A3 / Hooks フォールバック)
+	if cfg.Sources.Process.Enabled {
+		procSrc := process.New(busPublisher{bus: bus, accept: acceptCtx}, process.Config{
+			Interval:    cfg.Sources.Process.Interval,
+			ProcessName: cfg.Sources.Process.ProcessName,
+		}, logger)
+		go func() {
+			if err := procSrc.Run(acceptCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("process source: Run exited", "err", err)
+			}
+		}()
+		logger.Info("process source enabled",
+			"process_name", cfg.Sources.Process.ProcessName,
+			"interval", cfg.Sources.Process.Interval)
+	} else {
+		logger.Info("process source disabled")
+	}
+
 	// step 14: portfile atomic write
 	if err := writePortfile(portFilePath, port, tokenHash); err != nil {
 		return fmt.Errorf("daemon: portfile: %w", err)
@@ -234,4 +253,15 @@ func writePortfile(path string, port int, tokenHash [32]byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// busPublisher は process.Source 向けの薄い event.Bus ラッパ。
+// process source からの Publish は acceptCtx (新規受理ゲート) を内部で使う。
+type busPublisher struct {
+	bus    event.Bus
+	accept context.Context
+}
+
+func (p busPublisher) Publish(_ context.Context, ev event.Event) error {
+	return p.bus.Publish(p.accept, ev)
 }
