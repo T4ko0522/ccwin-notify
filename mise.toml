@@ -1,0 +1,16 @@
+# mise — toolchain 管理
+# `mise install` で以下を導入する。
+# Phase 1 の at-explorer で最新安定版を確認し、確定値は Phase 2 で固定。
+# 当面は再現性のため固定バージョン文字列を使う (latest は使わない)。
+
+[tools]
+go = "1.26.3"
+just = "1.51.0"
+
+[env]
+# Go の再現性確保: go.sum 整合性を厳格化
+GOFLAGS = "-mod=readonly"
+
+# Windows の場合、shim を有効にしておくと PowerShell からも `go` / `just` が解決しやすい
+[settings]
+experimental = false

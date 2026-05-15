@@ -1,0 +1,33 @@
+# ビルド成果物
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# テスト / カバレッジ
+*.test
+*.out
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 環境変数 / シークレット
+.env
+.env.local
+*.local
+secret.token
+
+# mise / direnv ローカル設定
+.mise.local.toml
+.envrc
