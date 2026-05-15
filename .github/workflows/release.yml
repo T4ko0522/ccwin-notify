@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish GitHub Release
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve version
+        id: vars
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset=ccwin-notify-$tag-windows-amd64.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: go build
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          go build -v -trimpath `
+            -ldflags "-s -w -X main.version=${{ steps.vars.outputs.version }}" `
+            -o dist/ccwin-notify.exe ./cmd/ccwin-notify
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          Copy-Item README.md     dist/README.md
+          Copy-Item SECURITY.md   dist/SECURITY.md
+          Copy-Item ARCHITECTURE.md dist/ARCHITECTURE.md
+
+      - name: Create zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/* -DestinationPath ${{ steps.vars.outputs.asset }} -Force
+
+      - name: Compute SHA256
+        id: hash
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash -Algorithm SHA256 ${{ steps.vars.outputs.asset }}).Hash.ToLower()
+          "sha256=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "$h  ${{ steps.vars.outputs.asset }}" | Out-File -FilePath "${{ steps.vars.outputs.asset }}.sha256"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.vars.outputs.asset }}
+            ${{ steps.vars.outputs.asset }}.sha256
+
+      - name: Export outputs for downstream workflows
+        shell: pwsh
+        run: |
+          "asset=${{ steps.vars.outputs.asset }}"   | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "sha256=${{ steps.hash.outputs.sha256 }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
