@@ -13,7 +13,7 @@ import (
 )
 
 func runSend(args []string) {
-	var kind string
+	var kind, titleOverride, bodyOverride string
 	useStdin := false
 
 	for i := 0; i < len(args); i++ {
@@ -21,6 +21,16 @@ func runSend(args []string) {
 		case "--kind", "-kind":
 			if i+1 < len(args) {
 				kind = args[i+1]
+				i++
+			}
+		case "--title", "-title":
+			if i+1 < len(args) {
+				titleOverride = args[i+1]
+				i++
+			}
+		case "--body", "-body":
+			if i+1 < len(args) {
+				bodyOverride = args[i+1]
 				i++
 			}
 		case "--stdin":
@@ -51,6 +61,16 @@ func runSend(args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "send: normalize error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// --title / --body は NormalizeHook 後に上書きする
+	// (Stop/SubagentStop kind は NormalizeHook 内で Title 固定上書きされるが、
+	// --title 指定があれば優先する)。
+	if titleOverride != "" {
+		ev.Title = titleOverride
+	}
+	if bodyOverride != "" {
+		ev.Body = bodyOverride
 	}
 
 	appdata := os.Getenv("APPDATA")
