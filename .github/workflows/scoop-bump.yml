@@ -1,0 +1,114 @@
+name: Bump Scoop manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (例: v1.0.1)。空欄なら最新リリースを使用'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Push manifest to t4ko0522/tap
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="$(gh release view --repo "${REPO}" --json tagName -q .tagName)"
+          fi
+          version="${tag#v}"
+          asset="ccwin-${tag}-windows-amd64.zip"
+          asset_url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
+          sha256_url="${asset_url}.sha256"
+
+          tmpdir="$(mktemp -d)"
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 5 \
+            --output "${tmpdir}/asset.sha256" "${sha256_url}"
+          sha256="$(awk '{print tolower($1)}' "${tmpdir}/asset.sha256")"
+
+          if [[ ! "${sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "::error::sha256 sidecar が想定形式ではありません: ${sha256}"
+            exit 1
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "version=${version}"
+            echo "asset_url=${asset_url}"
+            echo "sha256=${sha256}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: t4ko0522/tap
+          token: ${{ secrets.SCOOP_TAP_TOKEN }}
+
+      - name: Write manifest
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          ASSET_URL: ${{ steps.meta.outputs.asset_url }}
+          SHA256: ${{ steps.meta.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p bucket
+          cat > bucket/ccwin.json <<JSON
+          {
+              "version": "${VERSION}",
+              "description": "Windows toast / sound / webhook notifier for Claude Code Hooks.",
+              "homepage": "https://github.com/t4ko0522/ccwin-notify",
+              "license": "Unknown",
+              "architecture": {
+                  "64bit": {
+                      "url": "${ASSET_URL}",
+                      "hash": "${SHA256}",
+                      "bin": "ccwin.exe"
+                  }
+              },
+              "post_install": [
+                  "Write-Host ''",
+                  "Write-Host 'ccwin がインストールされました。' -ForegroundColor Green",
+                  "Write-Host '通知音・Webhook URL などを設定するには次を実行してください:' -ForegroundColor Cyan",
+                  "Write-Host '    ccwin init' -ForegroundColor Yellow",
+                  "Write-Host ''"
+              ],
+              "checkver": "github",
+              "autoupdate": {
+                  "architecture": {
+                      "64bit": {
+                          "url": "https://github.com/t4ko0522/ccwin-notify/releases/download/v\$version/ccwin-v\$version-windows-amd64.zip"
+                      }
+                  }
+              }
+          }
+          JSON
+
+      - name: Commit and push
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/ccwin.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "ccwin: ${TAG}"
+          git push
