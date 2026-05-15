@@ -104,6 +104,41 @@ func TestConfig_Validate_NonLoopbackBind(t *testing.T) {
 	}
 }
 
+// M-03 / A6: bind_address が 127.0.0.2 (loopback だが 127.0.0.1 ではない) なら拒否
+func TestConfig_Validate_BindAddress_StrictExactMatch(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		addr string
+		want bool // true = error 期待
+	}{
+		{"valid", "127.0.0.1", false},
+		{"127.0.0.2 loopback range", "127.0.0.2", true},
+		{"::1 IPv6 loopback", "::1", true},
+		{"0.0.0.0", "0.0.0.0", true},
+		{"invalid string", "not-an-ip", true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := config.Load("")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			cfg.IPC.BindAddress = tc.addr
+			err = cfg.Validate()
+			if tc.want && err == nil {
+				t.Errorf("bind_address=%q: error 期待だが nil", tc.addr)
+			}
+			if !tc.want && err != nil {
+				t.Errorf("bind_address=%q: 成功期待だが %v", tc.addr, err)
+			}
+		})
+	}
+}
+
 // TOML ファイルから設定を読み込むテスト
 func TestConfig_Load_FromTOML(t *testing.T) {
 	t.Parallel()

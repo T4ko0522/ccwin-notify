@@ -213,10 +213,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: shutdown_timeout must be > 0, got %v", c.ShutdownTimeout)
 	}
 
-	// bind_address は 127.0.0.1 固定 (A6)
+	// bind_address は 127.0.0.1 完全一致 (A6 / I2 / M-03)。
+	// IsLoopback() は ::1 / 127.0.0.0/8 を許してしまうため net.IPv4(127,0,0,1) と比較する。
 	ip := net.ParseIP(c.IPC.BindAddress)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("%w: got %q", ErrInvalidBindAddress, c.IPC.BindAddress)
+	if ip == nil || !ip.Equal(net.IPv4(127, 0, 0, 1)) {
+		return fmt.Errorf("%w: got %q (must be exactly \"127.0.0.1\")", ErrInvalidBindAddress, c.IPC.BindAddress)
 	}
 
 	// キュー容量は 1 以上
