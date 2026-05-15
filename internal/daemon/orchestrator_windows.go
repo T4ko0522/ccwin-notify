@@ -156,12 +156,19 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	startedAt := time.Now()
 	portFilePath := filepath.Join(ccwinDir, "daemon.port")
 
-	httpServer.RegisterRoute("POST", "/v1/events",
-		hooks.HandleEvents(bus, acceptCtx, tokenHash),
-		false, [32]byte{})
-	httpServer.RegisterRoute("GET", "/v1/events/stream",
-		hooks.HandleStream(sseHub, acceptCtx, tokenHash),
-		false, [32]byte{})
+	// M-08: hooks ソースが disabled のときは /v1/events と /v1/events/stream を登録しない。
+	// 認証突破経由でも events を投げ込めないことを保証する。
+	if cfg.Sources.Hooks.Enabled {
+		httpServer.RegisterRoute("POST", "/v1/events",
+			hooks.HandleEvents(bus, acceptCtx, tokenHash),
+			false, [32]byte{})
+		httpServer.RegisterRoute("GET", "/v1/events/stream",
+			hooks.HandleStream(sseHub, acceptCtx, tokenHash),
+			false, [32]byte{})
+		logger.Info("hooks source enabled — /v1/events and /v1/events/stream registered")
+	} else {
+		logger.Info("hooks source disabled — /v1/events route NOT registered")
+	}
 	httpServer.RegisterRoute("GET", "/v1/status",
 		HandleStatus(dispatcher, bus, sseHub, cfg, plainToken, startedAt, portFilePath),
 		true, tokenHash)
