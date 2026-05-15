@@ -30,9 +30,9 @@ Windows 実機での End-to-End 動作検証は未実施。
 - `internal/auth` — secret.token 生成・Windows ACL 設定 (LoadOrCreate / EnsureDirACL、fail-closed 設計)
 - CLI サブコマンド (`daemon` / `send` / `tui` / `config` / `version`) — 全て結線済み
 
-**未実装・未検証の機能 (継続サイクルで対応予定):**
+**未検証の機能 (継続サイクルで対応予定):**
 
-- プロセス監視 (`internal/source/process/` — 空ディレクトリ)
+- Windows 実機での End-to-End 検証 (Toast 発火 + Hooks → Webhook フロー)
 - Toast AUMID 整備 (スタートメニューへのショートカット登録 — Phase 5 以降)
 - Windows 実機での End-to-End 動作検証 (Toast 発火・Sound 再生・Webhook 送信を含む)
 - winget / scoop によるパッケージ配布
@@ -181,7 +181,7 @@ bind_address = "127.0.0.1"   # ループバックアドレス必須 (セキュ�
 enabled = true
 
 [sources.process]
-enabled = false    # internal/source/process は未実装 (v0.2.0 以降)
+enabled = false    # true にすると claude.exe を定期ポーリングし PID 消失で Stop event を発火 (Hooks フォールバック)
 interval = "2s"
 process_name = "claude.exe"
 idle_threshold = "60s"
@@ -266,7 +266,7 @@ ccwin-notify/
     │   └── sse/             # SSE Hub (Publish / Subscribe / Close)
     └── source/
         ├── hooks/           # Hooks IPC ハンドラ (HTTP server は非所有)
-        └── process/         # プロセス監視ポーリング (未実装 - v0.2.0 以降)
+        └── process/         # プロセス監視ポーリング (gopsutil + claude.exe PID 消失検知)
 
 ### アーキテクチャ概要
 
@@ -382,7 +382,7 @@ mise exec -- go test ./...
 
 - **bind_address 検証強化**: `config.Validate()` は現状 `IsLoopback()` 判定 (IPv6 `::1` や `127.0.0.2` も通過)。設計仕様 §6.2 は `127.0.0.1` 単一 IP 固定のため、実装を IP 完全一致チェックに修正する必要がある
 - **Toast AUMID 整備**: スタートメニューへのショートカット登録。Phase 5 以降で対応予定
-- **プロセス監視** (`internal/source/process`): 空ディレクトリ。v0.2.0 以降で実装予定
+- **プロセス監視** (`internal/source/process`): 実装済み。デフォルトは無効。`sources.process.enabled = true` で有効化すると Hooks の取りこぼしを補完する
 
 ---
 

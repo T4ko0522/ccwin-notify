@@ -57,7 +57,7 @@ User Gate: **PASS (条件付き)** — セキュリティ HIGH 4 件はユーザ
 |----|---|---|---|
 | A1 | BLOCKER | ✅ | `internal/source/hooks/hooks.go` + `T-031`〜 で Stop/Notification/SubagentStop を JSON 正規化 |
 | A2 | BLOCKER | ✅ | 計画 §3.2 で localhost HTTP を選定、`2_plan.md` D-19 |
-| A3 | MUST | 🟡 | `internal/source/process/` 未実装。`Config.Sources.Process.Enabled` は default `false` に修正済み (リトライ 2)。v0.2.0 で実装予定 |
+| A3 | MUST | ✅ | `internal/source/process/` 実装済み (gopsutil で claude.exe PID 集合の差分監視、消失時に `Stop` event を合成発火)。default は `enabled=false` で、`sources.process.enabled = true` で有効化すると Hooks の取りこぼしを補完する |
 | A4 | BLOCKER | ✅ | `event.Event` 共通型、Notifier は Source 値を見ない設計 |
 | A5 | MUST | ✅ | `config.Validate()` で両方 disabled の warning |
 | A6 | BLOCKER | 🟡 | `IsLoopback()` で `::1` / `127.0.0.0/8` 全体許容。設計仕様は `127.0.0.1` 完全一致 (SECURITY.md で既知差分明記) |
@@ -188,7 +188,8 @@ CLAUDE.md 規定の「3 回目は不可」を遵守。これ以上の追加修�
 - `security_followups.md` チェックリスト全件 (HIGH 4 + MEDIUM 9 + LOW 5 + Perf HIGH 2)
 
 ### 実装
-- `internal/source/process/` の最小実装 (G3 + A3 完全充足)
+<!-- A3 / G3: internal/source/process は実装済み (gopsutil 経由のポーリング) -->
+- (空き枠)
 - DACL 検証 / 監査ログ (I3 完全充足)
 - bind_address `127.0.0.1` 完全一致厳格化 (A6 完全充足)
 - `send.NormalizeHook` の ULID 採番 (G2 完全充足)
