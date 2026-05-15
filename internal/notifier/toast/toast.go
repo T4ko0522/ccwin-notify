@@ -1,5 +1,6 @@
 // Package toast は Windows Toast 通知の Notifier を提供する。
-// Red 段階: テストがコンパイルできる最小スタブ (at-implementer が置き換える)
+// 実装: toast_real_windows.go が jackmordaunt/go-toast を呼ぶ実体、
+// toast_fake_default.go が Fake (環境変数 CCWIN_NOTIFY_USE_FAKE_TOASTER=1 で切替)。
 package toast
 
 import (
@@ -74,7 +75,6 @@ type toastNotifier struct {
 var _ notifier.Notifier = (*toastNotifier)(nil)
 
 // New は Toaster を DI した Notifier を返す。
-// Red 段階: スタブ
 func New(toaster Toaster) notifier.Notifier {
 	return &toastNotifier{toaster: toaster, kindMask: nil}
 }

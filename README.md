@@ -209,7 +209,7 @@ max_retries = 3
 ### バリデーション規則
 
 - `ipc.bind_address`: 設計仕様 (§6.2) は `127.0.0.1` 単一 IP。v0.1.0 実装は `IsLoopback()` 判定のため `127.0.0.0/8` および `::1` も受理する。運用では必ず `127.0.0.1` を指定すること (実装側 TODO: 完全一致チェックに変更予定)。
-- `notifiers.webhook.*.url` は `enabled = true` の場合に `https://` 必須
+- `notifiers.webhook.*.url` は URL が空でなければ常に `https://` 必須 (enabled に関わらず検証)。`enabled = true` のときは URL が空文字なら起動失敗。エラーメッセージには URL 平文を含めない (H-03 / I4)。
 - `queue.capacity` は 1 以上
 - `queue.policy` は `drop-oldest` / `drop-newest` / `block` のいずれか
 - `dispatcher.max_concurrent_per_notifier` は 1 以上 256 以下

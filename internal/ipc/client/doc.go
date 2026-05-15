@@ -15,7 +15,7 @@
 //	  "pid":               12345,           // デーモンの PID
 //	  "port":              54321,           // HTTP サーバーのリッスンポート (> 0 必須)
 //	  "started_at":        "2026-05-15T...", // RFC 3339 形式の起動日時
-//	  "token_fingerprint": "abc123..."      // トークンの SHA-256 ハッシュ先頭 16 文字 (確認用)
+//	  "token_fingerprint": "sha256:<64文字 hex>" // トークンの SHA-256 を "sha256:" プレフィックス + 全 64 文字 hex で記録 (確認用)
 //	}
 //
 // フォーマット不一致・app フィールド不一致・port <= 0 の場合は [ErrPortfileInvalid] が返る。
