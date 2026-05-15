@@ -26,9 +26,9 @@ func New(cfg Config) notifier.Notifier {
 	return &noopSound{}
 }
 
-func (n *noopSound) Name() string                                     { return "sound" }
-func (n *noopSound) Wants(_ event.EventKind) bool                     { return true }
-func (n *noopSound) Notify(_ context.Context, _ event.Event) error    { return nil }
+func (n *noopSound) Name() string                                  { return "sound" }
+func (n *noopSound) Wants(_ event.EventKind) bool                  { return true }
+func (n *noopSound) Notify(_ context.Context, _ event.Event) error { return nil }
 
 // FakeSound はテスト用の in-memory 実装。
 type FakeSound struct {

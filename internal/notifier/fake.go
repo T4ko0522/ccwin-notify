@@ -13,10 +13,10 @@ var _ Notifier = (*FakeNotifier)(nil)
 // FakeNotifier はテスト用の in-memory 実装。
 // Records は Notify が呼ばれるたびに追記される公開フィールド。
 type FakeNotifier struct {
-	mu      sync.Mutex
-	name    string
-	Records []event.Event
-	Err     error // non-nil なら Notify がこのエラーを返す
+	mu       sync.Mutex
+	name     string
+	Records  []event.Event
+	Err      error         // non-nil なら Notify がこのエラーを返す
 	notifyCh chan struct{} // WaitForN 用 (n 件通知後に close)
 	waitN    int
 	seen     int

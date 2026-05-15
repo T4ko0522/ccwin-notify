@@ -64,10 +64,10 @@ func scrubURLError(err error) error {
 // Config は Webhook Notifier の設定 (Discord / Slack 共通)。
 type Config struct {
 	URL        secret.SecretString
-	Timeout    time.Duration            // per-attempt timeout
-	MaxRetries int                      // 0..10
+	Timeout    time.Duration // per-attempt timeout
+	MaxRetries int           // 0..10
 	KindMask   map[event.EventKind]bool
-	HTTPClient *http.Client             // nil で http.DefaultClient 相当を使う (テスト差替用)
+	HTTPClient *http.Client // nil で http.DefaultClient 相当を使う (テスト差替用)
 }
 
 type discordNotifier struct {

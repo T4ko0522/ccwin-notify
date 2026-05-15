@@ -15,13 +15,13 @@ import (
 )
 
 var (
-	winmm      = windows.NewLazyDLL("winmm.dll")
-	playSound  = winmm.NewProc("PlaySoundW")
+	winmm     = windows.NewLazyDLL("winmm.dll")
+	playSound = winmm.NewProc("PlaySoundW")
 )
 
 const (
-	sndFilename = 0x00020000 // SND_FILENAME
-	sndAsync    = 0x00000001 // SND_ASYNC
+	sndFilename  = 0x00020000 // SND_FILENAME
+	sndAsync     = 0x00000001 // SND_ASYNC
 	sndNoDefault = 0x00000002 // SND_NODEFAULT
 )
 
@@ -84,8 +84,8 @@ type FakeSound struct {
 	Calls []event.Event
 }
 
-func (f *FakeSound) Name() string                    { return "sound" }
-func (f *FakeSound) Wants(_ event.EventKind) bool    { return true }
+func (f *FakeSound) Name() string                 { return "sound" }
+func (f *FakeSound) Wants(_ event.EventKind) bool { return true }
 func (f *FakeSound) Notify(_ context.Context, ev event.Event) error {
 	f.Calls = append(f.Calls, ev)
 	return nil

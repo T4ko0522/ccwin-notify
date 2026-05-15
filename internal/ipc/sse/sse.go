@@ -34,9 +34,9 @@ type subscriber struct {
 
 // Hub は SSE 購読者の管理と非ブロッキング配信を担当する。
 type Hub struct {
-	mu      sync.Mutex
-	subs    map[*subscriber]struct{}
-	closed  bool
+	mu     sync.Mutex
+	subs   map[*subscriber]struct{}
+	closed bool
 }
 
 // NewHub は Hub を生成する。

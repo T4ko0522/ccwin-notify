@@ -21,8 +21,8 @@ import (
 // panicNotifier: Notify を呼ぶと必ず panic する Notifier (B3 / E1 テスト用)
 type panicNotifier struct{ name string }
 
-func (p *panicNotifier) Name() string                   { return p.name }
-func (p *panicNotifier) Wants(_ event.EventKind) bool   { return true }
+func (p *panicNotifier) Name() string                 { return p.name }
+func (p *panicNotifier) Wants(_ event.EventKind) bool { return true }
 func (p *panicNotifier) Notify(_ context.Context, _ event.Event) error {
 	panic("intentional panic for testing")
 }
@@ -44,8 +44,8 @@ func newSlowNotifier(name string) *slowNotifier {
 	}
 }
 
-func (s *slowNotifier) Name() string                   { return s.name }
-func (s *slowNotifier) Wants(_ event.EventKind) bool   { return true }
+func (s *slowNotifier) Name() string                 { return s.name }
+func (s *slowNotifier) Wants(_ event.EventKind) bool { return true }
 func (s *slowNotifier) Notify(ctx context.Context, _ event.Event) error {
 	s.started <- struct{}{} // 開始通知
 	select {
@@ -433,8 +433,8 @@ func TestDispatcher_SubmitAndCollect_ChanAlwaysClosed(t *testing.T) {
 
 // maskedNotifier: 特定 kind のみ Wants=true を返す Notifier (filterFor テスト用)
 type maskedNotifier struct {
-	name    string
-	allowed event.EventKind
+	name     string
+	allowed  event.EventKind
 	notified atomic.Int32
 }
 

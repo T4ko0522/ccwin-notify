@@ -30,8 +30,8 @@ func (realClock) NewTimer(d time.Duration) Timer { return &realTimer{t: time.New
 
 type realTimer struct{ t *time.Timer }
 
-func (rt *realTimer) C() <-chan time.Time      { return rt.t.C }
-func (rt *realTimer) Stop() bool               { return rt.t.Stop() }
+func (rt *realTimer) C() <-chan time.Time        { return rt.t.C }
+func (rt *realTimer) Stop() bool                 { return rt.t.Stop() }
 func (rt *realTimer) Reset(d time.Duration) bool { return rt.t.Reset(d) }
 
 // Real は実時刻の Clock 実装を返す。
@@ -81,8 +81,8 @@ func (f *fakeClock) NewTimer(d time.Duration) Timer {
 	return t
 }
 
-func (ft *fakeTimer) C() <-chan time.Time      { return ft.ch }
-func (ft *fakeTimer) Stop() bool               { ft.stopped = true; return true }
+func (ft *fakeTimer) C() <-chan time.Time        { return ft.ch }
+func (ft *fakeTimer) Stop() bool                 { ft.stopped = true; return true }
 func (ft *fakeTimer) Reset(d time.Duration) bool { return true }
 
 // Advance は指定分だけ時刻を進め、deadline を過ぎた Timer に通知する。

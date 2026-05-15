@@ -3,10 +3,10 @@
 // 受入条件: E3 — Hooks POST → Event → Notifier の end-to-end フロー
 //
 // このテストは production コードの重要な統合パスを検証する:
-//   1. hooks.HandleEvents が POST を受け取り Bus.Publish する
-//   2. event.Bus が Subscribe チャネルに Event を配信する
-//   3. Consumer goroutine が FakeNotifier.Notify を呼ぶ
-//   4. sse.Hub 経由で SSE 購読者に "event-published" が届く
+//  1. hooks.HandleEvents が POST を受け取り Bus.Publish する
+//  2. event.Bus が Subscribe チャネルに Event を配信する
+//  3. Consumer goroutine が FakeNotifier.Notify を呼ぶ
+//  4. sse.Hub 経由で SSE 購読者に "event-published" が届く
 //
 // NOTE: daemon.Dispatcher を使わず event.Bus を直接読む Consumer goroutine を使う。
 // これにより daemon パッケージのビルド状態に依存せず E2E フローを検証できる。

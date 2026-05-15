@@ -108,4 +108,3 @@ func TestSecretString_MarshalJSON_Masked(t *testing.T) {
 		})
 	}
 }
-
