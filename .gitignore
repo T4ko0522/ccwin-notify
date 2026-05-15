@@ -21,6 +21,8 @@ coverage.html
 # OS
 .DS_Store
 Thumbs.db
+# MSYS bash 経由で `cmd /c ... 2>nul` を実行したときに作られる実ファイル (Windows 開発時のみ発生)
+/nul
 
 # 環境変数 / シークレット
 .env
