@@ -613,7 +613,7 @@ func TestDispatcher_PanicWorker_SSEPublish(t *testing.T) {
 	// SSE Hub を購読
 	subCtx, cancelSub := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelSub()
-	sseC := hub.Subscribe(subCtx)
+	sseC, _ := hub.Subscribe(subCtx)
 
 	ev := event.Event{Kind: event.KindStop, Title: "panic-test"}
 	if err := bus.Publish(context.Background(), ev); err != nil {

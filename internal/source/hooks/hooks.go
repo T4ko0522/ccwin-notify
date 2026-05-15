@@ -96,16 +96,22 @@ func HandleStream(sseHub *sse.Hub, acceptCtx context.Context, expectedHash [32]b
 			return
 		}
 
+		// subCtx で Subscribe し、ハンドラ終了時に確実に hub から登録解除する (M3R subscriber cleanup)。
+		// 上限超過 (M-06) なら 503 を返してすぐ抜ける。Header/StatusOK を先に書いてしまわないよう
+		// SSE 用ヘッダ書き込みの前に Subscribe する。
+		subCtx, cancelSub := context.WithCancel(r.Context())
+		defer cancelSub()
+		ch, accepted := sseHub.Subscribe(subCtx)
+		if !accepted {
+			writeJSONError(w, http.StatusServiceUnavailable, "too_many_subscribers", "SSE subscriber limit reached")
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
-
-		// subCtx で Subscribe し、ハンドラ終了時に確実に hub から登録解除する (M3R subscriber cleanup)
-		subCtx, cancelSub := context.WithCancel(r.Context())
-		defer cancelSub()
-		ch := sseHub.Subscribe(subCtx)
 		pingTicker := time.NewTicker(30 * time.Second)
 		defer pingTicker.Stop()
 

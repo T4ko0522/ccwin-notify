@@ -134,7 +134,7 @@ func TestHooks_E2E_SSEEventPublished(t *testing.T) {
 	// SSE を購読
 	sseCtx, sseCancel := context.WithCancel(context.Background())
 	defer sseCancel()
-	sseCh := sseHub.Subscribe(sseCtx)
+	sseCh, _ := sseHub.Subscribe(sseCtx)
 
 	// acceptCtx
 	acceptCtx, cancelAccept := context.WithCancel(context.Background())

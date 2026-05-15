@@ -8,8 +8,14 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/net/netutil"
+
 	"github.com/t4ko0522/ccwin-notify/internal/ipc/middleware"
 )
+
+// maxConcurrentConns は HTTP server が同時に受け入れる接続数の上限 (M-06)。
+// 超過時、Accept() は前のコネクションが Close されるまでブロックする。
+const maxConcurrentConns = 16
 
 // Server は HTTP server の本体 (D-36)。
 type Server struct {
@@ -20,7 +26,9 @@ type Server struct {
 
 // New は net.Listener を受け取り Server を構築する。
 // WriteTimeout=0 (SSE 対応)、ReadHeaderTimeout=5s、ReadTimeout=10s、IdleTimeout=120s、MaxHeaderBytes=64KiB (D-37)。
+// Listener は netutil.LimitListener で同時接続数を maxConcurrentConns に制限する (M-06)。
 func New(ln net.Listener) *Server {
+	ln = netutil.LimitListener(ln, maxConcurrentConns)
 	mux := http.NewServeMux()
 	srv := &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,

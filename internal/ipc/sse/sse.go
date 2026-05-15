@@ -23,6 +23,10 @@ type SSEMessage struct {
 
 const subscriberBufferSize = 32
 
+// maxSubscribers は Hub が同時に保持できる購読者数の上限 (M-06)。
+// 超過時 Subscribe は ok=false を返し、呼び出し側 (HTTP handler) は 503 を返すこと。
+const maxSubscribers = 16
+
 // subscriber は単一の購読者を表す。
 type subscriber struct {
 	ch chan SSEMessage
@@ -63,7 +67,9 @@ func (h *Hub) Publish(msg SSEMessage) {
 
 // Subscribe は新規購読者を登録し receive-only チャネルを返す。
 // ctx.Done() で自動登録解除。
-func (h *Hub) Subscribe(ctx context.Context) <-chan SSEMessage {
+// ok=false のとき: Hub が close 済み、または購読者上限 (maxSubscribers) を超えた場合。
+// 上限超過時、呼び出し側は 503 Service Unavailable を返すこと (M-06)。
+func (h *Hub) Subscribe(ctx context.Context) (<-chan SSEMessage, bool) {
 	sub := &subscriber{
 		ch: make(chan SSEMessage, subscriberBufferSize),
 	}
@@ -72,7 +78,14 @@ func (h *Hub) Subscribe(ctx context.Context) <-chan SSEMessage {
 	if h.closed {
 		h.mu.Unlock()
 		close(sub.ch)
-		return sub.ch
+		return sub.ch, false
+	}
+	if len(h.subs) >= maxSubscribers {
+		h.mu.Unlock()
+		close(sub.ch)
+		slog.Warn("SSE Hub: subscriber limit reached, rejecting new subscriber",
+			"limit", maxSubscribers)
+		return sub.ch, false
 	}
 	h.subs[sub] = struct{}{}
 	h.mu.Unlock()
@@ -88,7 +101,7 @@ func (h *Hub) Subscribe(ctx context.Context) <-chan SSEMessage {
 		h.mu.Unlock()
 	}()
 
-	return sub.ch
+	return sub.ch, true
 }
 
 // Close は全購読者を切断 (shutdown 時)。

@@ -21,7 +21,7 @@ func TestHub_PublishAndSubscribe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	ch := hub.Subscribe(ctx)
+	ch, _ := hub.Subscribe(ctx)
 
 	msg := sse.SSEMessage{
 		Kind:    "event-published",
@@ -52,7 +52,7 @@ func TestHub_Close_ClosesSubscribers(t *testing.T) {
 	hub := sse.NewHub()
 
 	ctx := context.Background()
-	ch := hub.Subscribe(ctx)
+	ch, _ := hub.Subscribe(ctx)
 
 	hub.Close()
 
@@ -75,7 +75,7 @@ func TestHub_Subscribe_CtxCancel_Unsubscribes(t *testing.T) {
 	defer hub.Close()
 
 	subCtx, cancelSub := context.WithCancel(context.Background())
-	ch := hub.Subscribe(subCtx)
+	ch, _ := hub.Subscribe(subCtx)
 
 	// ctx をキャンセルして購読解除
 	cancelSub()
@@ -108,7 +108,7 @@ func TestHub_Publish_MultipleSubscribers(t *testing.T) {
 
 	chans := make([]<-chan sse.SSEMessage, numSubs)
 	for i := range chans {
-		chans[i] = hub.Subscribe(ctx)
+		chans[i], _ = hub.Subscribe(ctx)
 	}
 
 	msg := sse.SSEMessage{Kind: "dispatch-result"}
@@ -126,6 +126,38 @@ func TestHub_Publish_MultipleSubscribers(t *testing.T) {
 	}
 }
 
+// M-06: subscriber 上限を超えると ok=false で拒否される
+func TestHub_Subscribe_LimitReached(t *testing.T) {
+	t.Parallel()
+	hub := sse.NewHub()
+	defer hub.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const limit = 16 // sse.maxSubscribers と一致させること
+	// limit 個までは accepted=true
+	for i := 0; i < limit; i++ {
+		_, ok := hub.Subscribe(ctx)
+		if !ok {
+			t.Fatalf("%d 件目で拒否された (limit=%d まで accept 想定)", i+1, limit)
+		}
+	}
+	// limit+1 件目は ok=false
+	ch, ok := hub.Subscribe(ctx)
+	if ok {
+		t.Fatal("上限超過なのに accept された")
+	}
+	// 返り値の channel は close 済みのため即時 receive で zero value + false
+	select {
+	case _, alive := <-ch:
+		if alive {
+			t.Error("拒否された subscriber の channel は close されているはず")
+		}
+	default:
+		t.Error("拒否された channel は close されて非ブロックで返るはず")
+	}
+}
+
 // 遅い購読者がいても他の購読者をブロックしない (非ブロッキング特性)
 func TestHub_Publish_SlowSubscriberDoesNotBlock(t *testing.T) {
 	t.Parallel()
@@ -136,10 +168,10 @@ func TestHub_Publish_SlowSubscriberDoesNotBlock(t *testing.T) {
 	defer cancel()
 
 	// 遅い購読者 (チャネルを読まない)
-	_ = hub.Subscribe(ctx)
+	_, _ = hub.Subscribe(ctx)
 
 	// 速い購読者
-	fastCh := hub.Subscribe(ctx)
+	fastCh, _ := hub.Subscribe(ctx)
 
 	// 大量に Publish しても速い購読者がブロックされないことを確認
 	// (遅い購読者のバッファが溢れたら drop する)
