@@ -16,6 +16,9 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
 
+// Default は呼び出し側が defaultConfig() に相当する初期値を取得するためのエクスポート関数。
+func Default() *Config { return defaultConfig() }
+
 // Config は ccwin-notify の設定全体を表す。
 type Config struct {
 	LogLevel        string           `toml:"log_level"`
@@ -47,8 +50,10 @@ type IPCConfig struct {
 
 // SourcesConfig は EventSource の設定。
 type SourcesConfig struct {
-	Hooks   HooksConfig   `toml:"hooks"`
-	Process ProcessConfig `toml:"process"`
+	Hooks      HooksConfig      `toml:"hooks"`
+	Process    ProcessConfig    `toml:"process"`
+	Sessionlog SessionlogConfig `toml:"sessionlog"`
+	Wezterm    WezTermConfig    `toml:"wezterm"`
 }
 
 // HooksConfig は Hooks ソースの設定。
@@ -62,6 +67,28 @@ type ProcessConfig struct {
 	Interval      time.Duration `toml:"interval"`
 	ProcessName   string        `toml:"process_name"`
 	IdleThreshold time.Duration `toml:"idle_threshold"`
+}
+
+// SessionlogConfig は Claude Code セッションログ (jsonl) 監視ソースの設定。
+// Claude Code Hooks に依存せず、~/.claude/projects/*/*.jsonl の追記から
+// assistant の応答完了 (stop_reason=end_turn / stop_sequence) を検知して
+// Stop イベントを生成する経路 (D-01〜D-09 / [docs/plans/2026-05-15-sessionlog-source/2_plan.md])。
+type SessionlogConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	ProjectsDir string `toml:"projects_dir"`
+	BodyMaxLen  int    `toml:"body_max_len"`
+}
+
+// WezTermConfig は WezTerm ターミナル監視ソースの設定。
+// `wezterm cli get-text` で pane 内描画テキストを定期取得し、Claude Code の
+// 入力待ち UI シグネチャ (既定 "Enter to select") を検出して
+// Notification イベントを発火する。AskUserQuestion / ExitPlanMode は
+// hook も jsonl も即時通知できないため、現状で唯一の即時検知手段。
+type WezTermConfig struct {
+	Enabled      bool          `toml:"enabled"`
+	PaneID       int           `toml:"pane_id"`
+	PollInterval time.Duration `toml:"poll_interval"`
+	Signature    string        `toml:"signature"`
 }
 
 // NotifiersConfig は Notifier 群の設定。
@@ -128,13 +155,28 @@ func defaultConfig() *Config {
 				ProcessName:   "claude.exe",
 				IdleThreshold: 60 * time.Second,
 			},
+			Sessionlog: SessionlogConfig{
+				// 既存ユーザーの挙動を壊さないため既定 disabled (A7)。
+				// 利用時は config.toml で enabled=true を明示する。
+				Enabled:    false,
+				BodyMaxLen: 200,
+			},
+			Wezterm: WezTermConfig{
+				// WezTerm 専用機能のため既定 disabled。
+				// 利用時は config.toml で enabled=true を明示する。
+				Enabled:      false,
+				PaneID:       0,
+				PollInterval: time.Second,
+			},
 		},
 		Notifiers: NotifiersConfig{
 			Toast: ToastConfig{
 				Enabled: true,
 			},
 			Sound: SoundConfig{
-				Enabled: false,
+				// 同梱の default.wav (internal/notifier/sound/assets/default.wav) を
+				// 使用するため、WavPath 未指定でもデフォルトで有効化する。
+				Enabled: true,
 			},
 			Webhook: WebhookConfig{
 				Discord: WebhookEndpoint{
@@ -152,8 +194,24 @@ func defaultConfig() *Config {
 	}
 }
 
+// DefaultPath は config.toml の既定パスを返す。
+//   - $XDG_CONFIG_HOME が設定されていれば $XDG_CONFIG_HOME/ccwin-notify/config.toml
+//   - そうでなければ <UserHomeDir>/.config/ccwin-notify/config.toml (Windows では %USERPROFILE%\.config\ccwin-notify\config.toml)
+//
+// ホームディレクトリが解決できない場合は空文字を返す (呼び出し側で扱う)。
+func DefaultPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "ccwin-notify", "config.toml")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "ccwin-notify", "config.toml")
+}
+
 // Load は設定ファイルを読み込む。
-// 1) 指定パス (--config) 2) %APPDATA%/ccwin-notify/config.toml 3) デフォルトのみ の順で解決。
+// 1) 指定パス (--config) 2) [DefaultPath] 3) デフォルトのみ の順で解決。
 // ファイルが存在しない場合はデフォルト値のみを返す (エラーなし)。
 // 不正 TOML の場合は行番号付きエラーを返す。
 func Load(path string) (*Config, error) {
@@ -161,10 +219,7 @@ func Load(path string) (*Config, error) {
 
 	resolvedPath := path
 	if resolvedPath == "" {
-		appdata := os.Getenv("APPDATA")
-		if appdata != "" {
-			resolvedPath = filepath.Join(appdata, "ccwin-notify", "config.toml")
-		}
+		resolvedPath = DefaultPath()
 	}
 
 	if resolvedPath == "" {
@@ -189,7 +244,7 @@ func Load(path string) (*Config, error) {
 // ErrInvalidBindAddress は bind_address が 127.0.0.1 以外の場合に返る。
 var ErrInvalidBindAddress = errors.New("config: bind_address must be 127.0.0.1")
 
-// ErrSourcesAllDisabled は Hooks と Process の両 Source が disabled の場合に返る (A5)。
+// ErrSourcesAllDisabled は Hooks / Process / Sessionlog の全 Source が disabled の場合に返る (A5)。
 var ErrSourcesAllDisabled = errors.New("config: all sources are disabled (no events will be generated)")
 
 // Validate はバインドアドレス / URL HTTPS / 列挙値 / 必須項目をチェック (plan §6.2 全規則)。
@@ -247,8 +302,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: sources.process.interval must be >= 100ms, got %v", c.Sources.Process.Interval)
 	}
 
-	// A5: 両 Source が disabled の場合はエラー (イベントが生成されない)
-	if !c.Sources.Hooks.Enabled && !c.Sources.Process.Enabled {
+	// sources.sessionlog.body_max_len: 0 (= default) または 1..4096
+	if c.Sources.Sessionlog.BodyMaxLen < 0 || c.Sources.Sessionlog.BodyMaxLen > 4096 {
+		return fmt.Errorf("config: sources.sessionlog.body_max_len must be 0..4096, got %d", c.Sources.Sessionlog.BodyMaxLen)
+	}
+
+	// sources.sessionlog.projects_dir: 指定済なら絶対パス必須
+	if dir := c.Sources.Sessionlog.ProjectsDir; dir != "" && !filepath.IsAbs(dir) {
+		return fmt.Errorf("config: sources.sessionlog.projects_dir must be an absolute path, got %q", dir)
+	}
+
+	// sources.wezterm.pane_id: 非負
+	if c.Sources.Wezterm.PaneID < 0 {
+		return fmt.Errorf("config: sources.wezterm.pane_id must be >= 0, got %d", c.Sources.Wezterm.PaneID)
+	}
+
+	// sources.wezterm.poll_interval: 0 (= default) or >= 100ms
+	if c.Sources.Wezterm.PollInterval > 0 && c.Sources.Wezterm.PollInterval < 100*time.Millisecond {
+		return fmt.Errorf("config: sources.wezterm.poll_interval must be >= 100ms, got %v", c.Sources.Wezterm.PollInterval)
+	}
+
+	// A5: 全 Source が disabled の場合はエラー (イベントが生成されない)
+	if !c.Sources.Hooks.Enabled && !c.Sources.Process.Enabled &&
+		!c.Sources.Sessionlog.Enabled && !c.Sources.Wezterm.Enabled {
 		return ErrSourcesAllDisabled
 	}
 

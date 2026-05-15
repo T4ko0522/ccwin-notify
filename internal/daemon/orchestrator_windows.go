@@ -28,6 +28,8 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/notifier/webhook"
 	"github.com/t4ko0522/ccwin-notify/internal/source/hooks"
 	"github.com/t4ko0522/ccwin-notify/internal/source/process"
+	"github.com/t4ko0522/ccwin-notify/internal/source/sessionlog"
+	"github.com/t4ko0522/ccwin-notify/internal/source/wezterm"
 )
 
 func pidSelf() int {
@@ -99,11 +101,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if cfg.Notifiers.Toast.Enabled {
 		// 環境変数 CCWIN_NOTIFY_USE_FAKE_TOASTER=1 のとき FakeToaster を使う (CI / テスト用)。
 		// それ以外は NewDefaultToaster() で build tag に応じた実装を使う。
+		// Toast は常に silent モードで出す: 通知音は sound notifier が enabled なら
+		// その WAV、disabled なら無音、というユーザー側で完全制御できる仕様にする
+		// (Windows 標準 Toast 着信音は常時抑制)。
 		var toaster toast.Toaster
 		if os.Getenv("CCWIN_NOTIFY_USE_FAKE_TOASTER") == "1" {
 			toaster = toast.NewFakeToaster()
 		} else {
-			toaster = toast.NewDefaultToaster()
+			toaster = toast.NewDefaultToaster(true)
 		}
 		n := toast.NewWithKindMask(toaster, cfg.Notifiers.Toast.KindMask)
 		notifiers = append(notifiers, n)
@@ -204,6 +209,44 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			"interval", cfg.Sources.Process.Interval)
 	} else {
 		logger.Info("process source disabled")
+	}
+
+	// step 13.7: セッションログ (jsonl) 監視ソース (Hooks 経路バイパス / 1 ターン終了通知)
+	if cfg.Sources.Sessionlog.Enabled {
+		slSrc := sessionlog.New(busPublisher{bus: bus, accept: acceptCtx}, sessionlog.Config{
+			ProjectsDir: cfg.Sources.Sessionlog.ProjectsDir,
+			BodyMaxLen:  cfg.Sources.Sessionlog.BodyMaxLen,
+		}, logger)
+		go func() {
+			if err := slSrc.Run(acceptCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("sessionlog source: Run exited", "err", err)
+			}
+		}()
+		logger.Info("sessionlog source enabled",
+			"projects_dir", cfg.Sources.Sessionlog.ProjectsDir,
+			"body_max_len", cfg.Sources.Sessionlog.BodyMaxLen)
+	} else {
+		logger.Info("sessionlog source disabled")
+	}
+
+	// step 13.8: WezTerm ターミナル監視ソース (AskUserQuestion / ExitPlanMode の即時検知)
+	if cfg.Sources.Wezterm.Enabled {
+		wtSrc := wezterm.New(busPublisher{bus: bus, accept: acceptCtx}, wezterm.Config{
+			PaneID:       cfg.Sources.Wezterm.PaneID,
+			PollInterval: cfg.Sources.Wezterm.PollInterval,
+			Signature:    cfg.Sources.Wezterm.Signature,
+		}, logger)
+		go func() {
+			if err := wtSrc.Run(acceptCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("wezterm source: Run exited", "err", err)
+			}
+		}()
+		logger.Info("wezterm source enabled",
+			"pane_id", cfg.Sources.Wezterm.PaneID,
+			"poll_interval", cfg.Sources.Wezterm.PollInterval,
+			"signature", cfg.Sources.Wezterm.Signature)
+	} else {
+		logger.Info("wezterm source disabled")
 	}
 
 	// step 14: portfile atomic write

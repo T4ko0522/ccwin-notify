@@ -7,6 +7,7 @@ require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/shirou/gopsutil/v4 v4.26.4
 	golang.org/x/net v0.54.0
