@@ -63,11 +63,11 @@ func quietLogger() *slog.Logger {
 func TestPollOnce_FiresOnFalseToTrueTransition(t *testing.T) {
 	pub := &recordingPublisher{}
 	fetcher := &stubFetcher{texts: []string{
-		"some normal text",                              // matched=false → detected stays false, no publish
+		"some normal text", // matched=false → detected stays false, no publish
 		"prompt with Enter to select · ↑/↓ to navigate", // matched=true, false→true → publish
 		"prompt with Enter to select · ↑/↓ to navigate", // matched=true, true→true → no publish
-		"normal text again",                             // matched=false, true→false → no publish
-		"matches again Enter to select",                 // matched=true, false→true → publish
+		"normal text again",             // matched=false, true→false → no publish
+		"matches again Enter to select", // matched=true, false→true → publish
 	}}
 
 	src := New(pub, Config{Fetcher: fetcher}, quietLogger())

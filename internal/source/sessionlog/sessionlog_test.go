@@ -56,9 +56,9 @@ func (w *inMemoryWatcher) Add(p string) error {
 	return nil
 }
 
-func (w *inMemoryWatcher) Remove(_ string) error           { return nil }
+func (w *inMemoryWatcher) Remove(_ string) error                { return nil }
 func (w *inMemoryWatcher) Events() <-chan sessionlog.WatchEvent { return w.events }
-func (w *inMemoryWatcher) Errors() <-chan error            { return w.errors }
+func (w *inMemoryWatcher) Errors() <-chan error                 { return w.errors }
 func (w *inMemoryWatcher) Close() error {
 	// 二重 close を避けるため select で防御
 	defer func() { _ = recover() }()
