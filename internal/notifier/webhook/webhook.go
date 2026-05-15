@@ -113,7 +113,12 @@ func (n *discordNotifier) Notify(ctx context.Context, ev event.Event) error {
 	if len(n.cfg.KindMask) > 0 && !n.cfg.KindMask[ev.Kind] {
 		return nil
 	}
-	body := map[string]string{"content": ev.Title + "\n" + ev.Body}
+	// M-09: allowed_mentions={"parse":[]} で @everyone / @here / role / user mention を一律遮断。
+	// Hooks 経由で受け取った悪意ある content による通知爆撃を防ぐ。
+	body := map[string]any{
+		"content":          ev.Title + "\n" + ev.Body,
+		"allowed_mentions": map[string]any{"parse": []string{}},
+	}
 	return postWithRetry(ctx, n.http, n.cfg, body)
 }
 
@@ -127,7 +132,13 @@ func (n *slackNotifier) Notify(ctx context.Context, ev event.Event) error {
 	if len(n.cfg.KindMask) > 0 && !n.cfg.KindMask[ev.Kind] {
 		return nil
 	}
-	body := map[string]string{"text": ev.Title + "\n" + ev.Body}
+	// M-09: link_names=0 + mrkdwn=false + parse=none で @channel / @here / 全 mention を遮断。
+	body := map[string]any{
+		"text":       ev.Title + "\n" + ev.Body,
+		"link_names": 0,
+		"mrkdwn":     false,
+		"parse":      "none",
+	}
 	return postWithRetry(ctx, n.http, n.cfg, body)
 }
 

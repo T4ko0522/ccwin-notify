@@ -56,14 +56,23 @@ func TestDiscordNotifier_PayloadFormat(t *testing.T) {
 		t.Fatalf("Discord Notify: %v", err)
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
 		t.Fatalf("Discord payload JSON decode: %v (body=%q)", err, capturedBody)
 	}
 
 	expected := "Claude stopped\nTask done"
-	if got := payload["content"]; got != expected {
+	if got, _ := payload["content"].(string); got != expected {
 		t.Errorf("Discord content: got %q, want %q", got, expected)
+	}
+	// M-09: allowed_mentions={"parse":[]} で全 mention 抑止
+	am, ok := payload["allowed_mentions"].(map[string]any)
+	if !ok {
+		t.Fatal("allowed_mentions が含まれていない (M-09)")
+	}
+	parse, _ := am["parse"].([]any)
+	if len(parse) != 0 {
+		t.Errorf("allowed_mentions.parse: got %v, want empty array", parse)
 	}
 }
 
@@ -94,14 +103,24 @@ func TestSlackNotifier_PayloadFormat(t *testing.T) {
 		t.Fatalf("Slack Notify: %v", err)
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(capturedBody, &payload); err != nil {
 		t.Fatalf("Slack payload JSON decode: %v (body=%q)", err, capturedBody)
 	}
 
 	expected := "Input required\nPlease answer"
-	if got := payload["text"]; got != expected {
+	if got, _ := payload["text"].(string); got != expected {
 		t.Errorf("Slack text: got %q, want %q", got, expected)
+	}
+	// M-09: link_names=0 / mrkdwn=false / parse=none で mention 抑止
+	if v, _ := payload["link_names"].(float64); v != 0 {
+		t.Errorf("link_names: got %v, want 0", v)
+	}
+	if v, _ := payload["mrkdwn"].(bool); v {
+		t.Errorf("mrkdwn: got %v, want false", v)
+	}
+	if v, _ := payload["parse"].(string); v != "none" {
+		t.Errorf("parse: got %q, want \"none\"", v)
 	}
 }
 
