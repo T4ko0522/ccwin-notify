@@ -38,15 +38,15 @@ Windows 以外では起動しない。
 scoop bucket add t4ko0522 https://github.com/t4ko0522/tap
 
 # 2. インストール
-scoop install ccwin-notify
+scoop install ccwin
 
 # 3. 初期設定 (対話型ウィザードで音声 / Webhook URL などを設定)
-ccwin-notify init
+ccwin init
 ```
 
-`ccwin-notify init` が `%APPDATA%\ccwin-notify\config.toml` を作成する。既存ファイルがある場合は上書き確認が出る (`--force` でスキップ可)。
+`ccwin init` が `%APPDATA%\ccwin-notify\config.toml` を作成する。既存ファイルがある場合は上書き確認が出る (`--force` でスキップ可)。
 
-更新は `scoop update ccwin-notify` で行う。
+更新は `scoop update ccwin` で行う。
 
 ---
 
@@ -55,7 +55,7 @@ ccwin-notify init
 ### 1. デーモンを起動する
 
 ```powershell
-ccwin-notify daemon
+ccwin daemon
 ```
 
 このターミナルは起動したままにする。閉じるとデーモンも止まる。
@@ -65,12 +65,12 @@ ccwin-notify daemon
 別のターミナルで TUI を起動すると、通知の流れがリアルタイムで見える。
 
 ```powershell
-ccwin-notify tui
+ccwin tui
 ```
 
 ### 3. Claude Code 側に Hooks を設定する
 
-`~/.claude/settings.json` に以下を追加する。`C:\path\to\hook.ps1` と `C:\path\to\ccwin-notify.exe` は実際のパスに置き換える (Scoop インストールなら `ccwin-notify.exe` は `~\scoop\apps\ccwin-notify\current\ccwin-notify.exe`)。
+`~/.claude/settings.json` に以下を追加する。`C:\path\to\hook.ps1` と `C:\path\to\ccwin.exe` は実際のパスに置き換える (Scoop インストールなら `ccwin.exe` は `~\scoop\apps\ccwin\current\ccwin.exe`)。
 
 ```jsonc
 {
@@ -104,7 +104,7 @@ ccwin-notify tui
 
 ```powershell
 param([string]$Kind)
-$Input | & "C:\path\to\ccwin-notify.exe" send --kind $Kind --stdin
+$Input | & "C:\path\to\ccwin.exe" send --kind $Kind --stdin
 ```
 
 これで Claude Code が応答を完了したタイミング (`Stop`) などに通知が飛ぶようになる。
@@ -123,7 +123,7 @@ $Input | & "C:\path\to\ccwin-notify.exe" send --kind $Kind --stdin
 
 設定ファイルのパス: `%APPDATA%\ccwin-notify\config.toml`
 
-`ccwin-notify init` で作成できる。ファイルが存在しない場合はデフォルト値で動作する。
+`ccwin init` で作成できる。ファイルが存在しない場合はデフォルト値で動作する。
 
 ### 設定例
 
@@ -160,13 +160,13 @@ Webhook URL はログや表示には出力されないようマスクされる�
 
 | サブコマンド | 説明 |
 |-------------|------|
-| `ccwin-notify daemon` | デーモンを起動する |
-| `ccwin-notify init` | 対話型ウィザードで `config.toml` を生成する (`--force` で既存上書き確認をスキップ) |
-| `ccwin-notify tui` | ライブログ TUI を起動する |
-| `ccwin-notify send --kind <Kind> --stdin` | stdin の JSON を Hook イベントとしてデーモンに送信 (Hook 用) |
-| `ccwin-notify config show` | 現在の設定を表示する |
-| `ccwin-notify config path` | 設定ファイルのパスを表示する |
-| `ccwin-notify version` | バージョンを表示する |
+| `ccwin daemon` | デーモンを起動する |
+| `ccwin init` | 対話型ウィザードで `config.toml` を生成する (`--force` で既存上書き確認をスキップ) |
+| `ccwin tui` | ライブログ TUI を起動する |
+| `ccwin send --kind <Kind> --stdin` | stdin の JSON を Hook イベントとしてデーモンに送信 (Hook 用) |
+| `ccwin config show` | 現在の設定を表示する |
+| `ccwin config path` | 設定ファイルのパスを表示する |
+| `ccwin version` | バージョンを表示する |
 
 ---
 
@@ -193,12 +193,12 @@ Webhook URL はログや表示には出力されないようマスクされる�
 Remove-Item "$env:APPDATA\ccwin-notify\daemon.port"
 
 # デーモンを再起動
-ccwin-notify daemon
+ccwin daemon
 ```
 
 ### `subcommand required` と表示されて終了する
 
-`ccwin-notify` を引数なしで実行するとこのメッセージが出る。`daemon` / `init` / `tui` / `config` / `version` のいずれかを必ず指定する。
+`ccwin` を引数なしで実行するとこのメッセージが出る。`daemon` / `init` / `tui` / `config` / `version` のいずれかを必ず指定する。
 
 ---
 

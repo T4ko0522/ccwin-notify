@@ -4,7 +4,7 @@
 //
 // H2 の検証方法:
 //   - go test -run=TestMain_NonWindows_ExitCode を helper process として起動
-//   - 子プロセスが "ccwin-notify is Windows-only" を stderr に出力し exit 非ゼロで終了することを確認
+//   - 子プロセスが "ccwin is Windows-only" を stderr に出力し exit 非ゼロで終了することを確認
 //
 // NOTE: main.go は GOOS != "windows" で exit 2 を返す (実装済み)。
 // 非 Windows 環境での exit 2 確認は main_non_windows_test.go (//go:build !windows) で行う。

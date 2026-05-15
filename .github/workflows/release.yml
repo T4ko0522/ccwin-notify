@@ -31,7 +31,7 @@ jobs:
           $version = $tag.TrimStart('v')
           "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "asset=ccwin-notify-$tag-windows-amd64.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset=ccwin-$tag-windows-amd64.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: go build
         shell: pwsh
@@ -43,7 +43,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           go build -v -trimpath `
             -ldflags "-s -w -X main.version=${{ steps.vars.outputs.version }}" `
-            -o dist/ccwin-notify.exe ./cmd/ccwin-notify
+            -o dist/ccwin.exe ./cmd/ccwin-notify
 
       - name: Stage release files
         shell: pwsh
@@ -68,6 +68,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.SCOOP_TAP_TOKEN }}
           tag_name: ${{ steps.vars.outputs.tag }}
           name: ${{ steps.vars.outputs.tag }}
           generate_release_notes: true

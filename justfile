@@ -8,9 +8,9 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 default:
     @just --list
 
-# ビルド (cmd/ccwin-notify を bin/ccwin-notify.exe へ出力)
+# ビルド (cmd/ccwin-notify を bin/ccwin.exe へ出力)
 build:
-    go build -o bin/ccwin-notify.exe ./cmd/ccwin-notify
+    go build -o bin/ccwin.exe ./cmd/ccwin-notify
 
 # テスト (全パッケージ)
 test:

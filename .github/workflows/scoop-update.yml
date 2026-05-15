@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          asset="ccwin-notify-${TAG}-windows-amd64.zip"
+          asset="ccwin-${TAG}-windows-amd64.zip"
           asset_url="https://github.com/${REPO}/releases/download/${TAG}/${asset}"
           sha256_url="${asset_url}.sha256"
 
@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p tap/bucket
-          cat > tap/bucket/ccwin-notify.json <<JSON
+          cat > tap/bucket/ccwin.json <<JSON
           {
             "version": "${VERSION}",
             "description": "Windows toast / sound / webhook notifier for Claude Code Hooks.",
@@ -70,14 +70,14 @@ jobs:
               "64bit": {
                 "url": "${ASSET_URL}",
                 "hash": "${SHA256}",
-                "bin": "ccwin-notify.exe"
+                "bin": "ccwin.exe"
               }
             },
             "post_install": [
               "Write-Host ''",
-              "Write-Host 'ccwin-notify がインストールされました。' -ForegroundColor Green",
+              "Write-Host 'ccwin がインストールされました。' -ForegroundColor Green",
               "Write-Host '通知音・Webhook URL などを設定するには次を実行してください:' -ForegroundColor Cyan",
-              "Write-Host '    ccwin-notify init' -ForegroundColor Yellow",
+              "Write-Host '    ccwin init' -ForegroundColor Yellow",
               "Write-Host ''"
             ],
             "checkver": {
@@ -86,7 +86,7 @@ jobs:
             "autoupdate": {
               "architecture": {
                 "64bit": {
-                  "url": "https://github.com/t4ko0522/ccwin-notify/releases/download/v\$version/ccwin-notify-v\$version-windows-amd64.zip",
+                  "url": "https://github.com/t4ko0522/ccwin-notify/releases/download/v\$version/ccwin-v\$version-windows-amd64.zip",
                   "hash": {
                     "url": "\$url.sha256",
                     "regex": "^([A-Fa-f0-9]+)"
@@ -102,12 +102,12 @@ jobs:
         with:
           path: tap
           token: ${{ secrets.SCOOP_TAP_TOKEN }}
-          commit-message: "ccwin-notify: bump to ${{ steps.meta.outputs.version }}"
-          branch: update/ccwin-notify-${{ steps.meta.outputs.version }}
+          commit-message: "ccwin: bump to ${{ steps.meta.outputs.version }}"
+          branch: update/ccwin-${{ steps.meta.outputs.version }}
           delete-branch: true
-          title: "ccwin-notify: bump to ${{ steps.meta.outputs.version }}"
+          title: "ccwin: bump to ${{ steps.meta.outputs.version }}"
           body: |
-            ccwin-notify ${{ steps.meta.outputs.tag }} の自動更新 PR です。
+            ccwin ${{ steps.meta.outputs.tag }} の自動更新 PR です。
 
             - asset: ${{ steps.meta.outputs.asset_url }}
             - sha256: `${{ steps.meta.outputs.sha256 }}`

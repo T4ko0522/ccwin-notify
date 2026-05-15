@@ -12,7 +12,7 @@ var version = "0.1.0"
 
 func main() {
 	if runtime.GOOS != "windows" {
-		fmt.Fprintln(os.Stderr, "ccwin-notify is Windows-only (got GOOS="+runtime.GOOS+")")
+		fmt.Fprintln(os.Stderr, "ccwin is Windows-only (got GOOS="+runtime.GOOS+")")
 		os.Exit(2)
 	}
 
@@ -33,7 +33,7 @@ func main() {
 	case "init":
 		runInit(os.Args[2:])
 	case "version":
-		fmt.Println("ccwin-notify " + version)
+		fmt.Println("ccwin " + version)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %q\n", os.Args[1])
 		fmt.Fprintln(os.Stderr, "available: daemon | send | tui | config | init | version")
