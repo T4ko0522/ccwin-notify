@@ -4,7 +4,7 @@ Windows で Claude Code のセッションイベントを通知するデーモ�
 
 Claude Code が応答を完了したり通知を出したりしたタイミングを、Windows のトースト通知・サウンド再生・Discord / Slack の Webhook で受け取れる。長時間の作業中に Claude Code の状態を見逃さなくなる。
 
-> 現在ベータ版 (v0.1.0)。
+> 現在ベータ版 (v1.0.1)
 
 ---
 
