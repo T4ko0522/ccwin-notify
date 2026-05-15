@@ -13,6 +13,12 @@ jobs:
     name: Build & publish GitHub Release
     runs-on: windows-latest
     timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      version: ${{ steps.vars.outputs.version }}
+      asset: ${{ steps.vars.outputs.asset }}
+      asset_url: ${{ steps.vars.outputs.asset_url }}
+      sha256: ${{ steps.hash.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,9 +35,12 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $version = $tag.TrimStart('v')
-          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "asset=ccwin-$tag-windows-amd64.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $asset = "ccwin-$tag-windows-amd64.zip"
+          $assetUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$asset"
+          "tag=$tag"             | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset=$asset"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset_url=$assetUrl"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: go build
         shell: pwsh
@@ -68,7 +77,6 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.SCOOP_TAP_TOKEN }}
           tag_name: ${{ steps.vars.outputs.tag }}
           name: ${{ steps.vars.outputs.tag }}
           generate_release_notes: true
@@ -77,8 +85,85 @@ jobs:
             ${{ steps.vars.outputs.asset }}
             ${{ steps.vars.outputs.asset }}.sha256
 
-      - name: Export outputs for downstream workflows
+      - name: Summary
         shell: pwsh
         run: |
           "asset=${{ steps.vars.outputs.asset }}"   | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "sha256=${{ steps.hash.outputs.sha256 }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+  update-scoop:
+    name: Open PR to t4ko0522/tap
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: t4ko0522/tap
+          token: ${{ secrets.SCOOP_TAP_TOKEN }}
+          path: tap
+
+      - name: Write manifest
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          ASSET_URL: ${{ needs.release.outputs.asset_url }}
+          SHA256: ${{ needs.release.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p tap/bucket
+          cat > tap/bucket/ccwin.json <<JSON
+          {
+            "version": "${VERSION}",
+            "description": "Windows toast / sound / webhook notifier for Claude Code Hooks.",
+            "homepage": "https://github.com/t4ko0522/ccwin-notify",
+            "license": "Unknown",
+            "architecture": {
+              "64bit": {
+                "url": "${ASSET_URL}",
+                "hash": "${SHA256}",
+                "bin": "ccwin.exe"
+              }
+            },
+            "post_install": [
+              "Write-Host ''",
+              "Write-Host 'ccwin がインストールされました。' -ForegroundColor Green",
+              "Write-Host '通知音・Webhook URL などを設定するには次を実行してください:' -ForegroundColor Cyan",
+              "Write-Host '    ccwin init' -ForegroundColor Yellow",
+              "Write-Host ''"
+            ],
+            "checkver": {
+              "github": "https://github.com/t4ko0522/ccwin-notify"
+            },
+            "autoupdate": {
+              "architecture": {
+                "64bit": {
+                  "url": "https://github.com/t4ko0522/ccwin-notify/releases/download/v\$version/ccwin-v\$version-windows-amd64.zip",
+                  "hash": {
+                    "url": "\$url.sha256",
+                    "regex": "^([A-Fa-f0-9]+)"
+                  }
+                }
+              }
+            }
+          }
+          JSON
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: tap
+          token: ${{ secrets.SCOOP_TAP_TOKEN }}
+          commit-message: "ccwin: bump to ${{ needs.release.outputs.version }}"
+          branch: update/ccwin-${{ needs.release.outputs.version }}
+          delete-branch: true
+          title: "ccwin: bump to ${{ needs.release.outputs.version }}"
+          body: |
+            ccwin ${{ needs.release.outputs.tag }} の自動更新 PR です。
+
+            - asset: ${{ needs.release.outputs.asset_url }}
+            - sha256: `${{ needs.release.outputs.sha256 }}`
+
+            このPRは [Release workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) によって自動生成されました。
