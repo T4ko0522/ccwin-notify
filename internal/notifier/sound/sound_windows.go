@@ -23,6 +23,7 @@ const (
 	sndFilename  = 0x00020000 // SND_FILENAME
 	sndAsync     = 0x00000001 // SND_ASYNC
 	sndNoDefault = 0x00000002 // SND_NODEFAULT
+	sndMemory    = 0x00000004 // SND_MEMORY
 )
 
 // Config は Sound Notifier の設定。
@@ -61,6 +62,16 @@ func (s *soundNotifier) Notify(ctx context.Context, ev event.Event) error {
 	}
 
 	if s.wavPath == "" {
+		// WavPath 未指定: 同梱 default.wav を SND_MEMORY で再生する。
+		// embed バイト列は static なので SND_ASYNC でも安全に参照され続ける。
+		if len(defaultWAV) == 0 {
+			return nil
+		}
+		playSound.Call(
+			uintptr(unsafe.Pointer(&defaultWAV[0])),
+			0,
+			sndMemory|sndAsync|sndNoDefault,
+		)
 		return nil
 	}
 

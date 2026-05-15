@@ -53,13 +53,23 @@ func TestNew_Windows_Wants_KindMask(t *testing.T) {
 	}
 }
 
-// T-116 / B1: WavPath="" のとき Notify は nil を返す (PlaySoundW を呼ばない)
-func TestNew_Windows_Notify_EmptyWavPath_Nil(t *testing.T) {
+// T-116 / B1: WavPath="" のとき Notify は同梱 default.wav を SND_MEMORY 経由で
+// 再生し、エラーは返さない。再生自体は副作用 (PlaySoundW 呼び出し) のため、
+// このテストではエラーが返らない・panic しないことのみを確認する。
+func TestNew_Windows_Notify_EmptyWavPath_PlaysEmbedded(t *testing.T) {
 	t.Parallel()
 	n := sound.New(sound.Config{WavPath: ""})
 	ev := event.Event{Kind: event.KindStop, Title: "test"}
 	if err := n.Notify(context.Background(), ev); err != nil {
-		t.Errorf("WavPath 空: got %v, want nil", err)
+		t.Errorf("WavPath 空 (embed 再生): got %v, want nil", err)
+	}
+}
+
+// 同梱 default.wav が非空であること (embed が正しく取り込まれている)。
+func TestEmbeddedDefaultWAV_NonEmpty(t *testing.T) {
+	t.Parallel()
+	if len(sound.DefaultWAV()) == 0 {
+		t.Error("DefaultWAV(): 0 バイト — assets/default.wav が embed されていない")
 	}
 }
 

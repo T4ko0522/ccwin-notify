@@ -14,14 +14,18 @@ import (
 // Push は ctx で中断可能にする (C-05 対応)。
 // toastNotifier.Notify は goroutine を起動せず直接 Push を呼ぶため、
 // Push 内の panic は Dispatcher の defer recover で捕捉される。
+//
+// urgent=true のとき Toast Duration を Long に設定し、画面右下に長時間表示する
+// (Claude のユーザー操作待ち通知など、見落としを避けたいシグナル用)。
 type Toaster interface {
-	Push(ctx context.Context, title, body string) error
+	Push(ctx context.Context, title, body string, urgent bool) error
 }
 
 // PushCall は FakeToaster が記録する呼出情報。
 type PushCall struct {
-	Title string
-	Body  string
+	Title  string
+	Body   string
+	Urgent bool
 }
 
 // FakeToaster はテスト用の in-memory Toaster 実装。
@@ -35,8 +39,8 @@ func NewFakeToaster() *FakeToaster {
 }
 
 // Push は呼出を記録する。
-func (f *FakeToaster) Push(_ context.Context, title, body string) error {
-	f.calls = append(f.calls, PushCall{Title: title, Body: body})
+func (f *FakeToaster) Push(_ context.Context, title, body string, urgent bool) error {
+	f.calls = append(f.calls, PushCall{Title: title, Body: body, Urgent: urgent})
 	return nil
 }
 
@@ -56,7 +60,7 @@ func NewBlockingFakeToaster() *BlockingFakeToaster {
 }
 
 // Push はブロックして返らない (ctx タイムアウトで解放される)。
-func (b *BlockingFakeToaster) Push(ctx context.Context, title, body string) error {
+func (b *BlockingFakeToaster) Push(ctx context.Context, _, _ string, _ bool) error {
 	select {
 	case <-b.release:
 		return nil
@@ -105,5 +109,8 @@ func (n *toastNotifier) Notify(ctx context.Context, ev event.Event) error {
 
 	// goroutine を使わず直接呼ぶ (C-05: panic が Dispatcher の recover で捕捉されるよう)。
 	// Toaster 実装は ctx に従って中断する責務を持つ。
-	return n.toaster.Push(ctx, ev.Title, ev.Body)
+	//
+	// ユーザー操作待ち (KindNotification) は見落としを避けるため Long duration で表示する。
+	urgent := ev.Kind == event.KindNotification
+	return n.toaster.Push(ctx, ev.Title, ev.Body, urgent)
 }
