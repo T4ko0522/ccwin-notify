@@ -15,6 +15,7 @@ import (
 
 	"github.com/t4ko0522/ccwin-notify/internal/config"
 	"github.com/t4ko0522/ccwin-notify/internal/event"
+	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
 
 // T-074: config.Load("") がデフォルト値を返し Validate() を通過する (D2)
@@ -223,6 +224,30 @@ func TestConfig_Validate_Webhook_DisabledButInvalidURL_Rejected(t *testing.T) {
 	err = cfg.Validate()
 	if err == nil {
 		t.Error("I1/B6: disabled でも http:// URL の場合 Validate はエラーを返すべきだが nil だった (Red)")
+	}
+}
+
+// H-03: Webhook URL 不正のエラーメッセージに URL 平文が含まれない (I4)
+func TestConfig_Validate_Webhook_InvalidURL_DoesNotLeakURL(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	secretToken := "discord.com/api/webhooks/12345/SECRET_TOKEN_DO_NOT_LEAK"
+	cfg.Notifiers.Webhook.Discord.Enabled = false
+	cfg.Notifiers.Webhook.Discord.URL = secret.SecretString("http://" + secretToken)
+
+	err = cfg.Validate()
+	if err == nil {
+		t.Fatal("invalid URL なのに Validate が成功")
+	}
+	if strings.Contains(err.Error(), "SECRET_TOKEN_DO_NOT_LEAK") {
+		t.Errorf("エラーに URL/token 平文が漏れている: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "redacted") {
+		t.Errorf("redacted マーカーがない: %s", err.Error())
 	}
 }
 

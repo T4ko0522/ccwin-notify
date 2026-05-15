@@ -280,8 +280,9 @@ func validateWebhookEndpoint(ep WebhookEndpoint, name string) error {
 	raw := ep.URL.Reveal()
 
 	// URL が空でなければ HTTPS 検証 (enabled に関わらず)
+	// URL 自体は平文露出させない (H-03 / I4)。エラーメッセージには name のみ含める。
 	if raw != "" && !strings.HasPrefix(raw, "https://") {
-		return fmt.Errorf("config: notifiers.webhook.%s.url must start with https://, got %q", name, raw)
+		return fmt.Errorf("config: notifiers.webhook.%s.url must start with https:// (value redacted)", name)
 	}
 
 	// enabled=true のとき URL は必須

@@ -199,6 +199,52 @@ func TestNotifier_5xx_ReturnsError(t *testing.T) {
 	}
 }
 
+// H-03: hc.Do が *url.Error を返した場合、エラーメッセージに URL 文字列が含まれない
+func TestNotifier_DialFailure_URLNotInError(t *testing.T) {
+	t.Parallel()
+
+	// 確実に dial 失敗するアドレス (port 1 / RFC2606 reserved)
+	secretURL := "https://discord.com/api/webhooks/SECRET_ID_12345/SECRET_TOKEN_ABCDEF_TOKEN"
+	// dial 失敗を起こすため、実 host は別の到達不能アドレスに差し替えるのではなく、
+	// httptest を閉じてから使うことで Connection refused を再現する
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.Close() // closed server に POST → connect refused
+
+	cfg := webhook.Config{
+		URL:        secret.SecretString(srv.URL + "/api/webhooks/SECRET_ID_12345/SECRET_TOKEN_ABCDEF"),
+		Timeout:    500 * time.Millisecond,
+		MaxRetries: 0,
+		HTTPClient: srv.Client(),
+	}
+	n := webhook.NewDiscord(cfg)
+
+	err := n.Notify(context.Background(), testEvent(event.KindStop, "t", "b"))
+	if err == nil {
+		t.Fatal("dial 失敗でエラーが返らなかった")
+	}
+	msg := err.Error()
+	if contains(msg, "SECRET_TOKEN_ABCDEF") || contains(msg, "SECRET_ID_12345") || contains(msg, "/api/webhooks/") {
+		t.Errorf("エラーに URL/token が漏れている: %s", msg)
+	}
+	if !contains(msg, "url redacted") {
+		t.Errorf("scrub マーカー 'url redacted' が含まれない: %s", msg)
+	}
+	_ = secretURL
+}
+
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && (indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
 // T-101b / B5: MaxRetries=2 → 計 3 回 呼ばれる (バックオフ時間を 0 相当に短縮)
 // ctx タイムアウト < バックオフ待機時間 になることを避けるため短い timeout を使う
 func TestNotifier_5xx_MaxRetries2_AttemptCount(t *testing.T) {

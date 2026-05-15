@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -14,6 +16,33 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/notifier"
 	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
+
+// redactedURLError は url.Error 由来のメッセージから URL 文字列を除去した wrapper。
+// errors.Is / errors.As でチェーンを保持しつつ、Error() からは URL を出さない (H-03)。
+type redactedURLError struct {
+	inner error
+	msg   string
+}
+
+func (e *redactedURLError) Error() string { return e.msg }
+func (e *redactedURLError) Unwrap() error { return e.inner }
+
+// scrubURLError は hc.Do が返す *url.Error を URL を含まないメッセージで包む。
+// URL 以外のエラー (json marshal 等) はそのまま返す。
+func scrubURLError(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	inner := urlErr.Err
+	if inner == nil {
+		return &redactedURLError{inner: err, msg: fmt.Sprintf("%s failed (url redacted)", urlErr.Op)}
+	}
+	return &redactedURLError{
+		inner: inner,
+		msg:   fmt.Sprintf("%s failed (url redacted): %s", urlErr.Op, inner.Error()),
+	}
+}
 
 // Config は Webhook Notifier の設定 (Discord / Slack 共通)。
 type Config struct {
@@ -126,7 +155,7 @@ func postWithRetry(ctx context.Context, hc *http.Client, cfg Config, payload int
 		resp, err := hc.Do(req)
 		cancel()
 		if err != nil {
-			lastErr = fmt.Errorf("webhook: post attempt %d: %w", attempt+1, err)
+			lastErr = fmt.Errorf("webhook: post attempt %d: %w", attempt+1, scrubURLError(err))
 			continue
 		}
 		resp.Body.Close()
