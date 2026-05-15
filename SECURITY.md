@@ -1,17 +1,3 @@
-# セキュリティポリシー
-
-## 脆弱性の報告
-
-セキュリティ上の問題を発見した場合は、公開 Issue ではなく以下のいずれかで報告してください。
-
-1. **GitHub Security Advisory (推奨)**: リポジトリの "Security" タブ > "Report a vulnerability" から非公開で報告
-2. **Email (代替)**: `vodaivodai555@gmail.com` に件名「ccwin-notify security」で連絡
-
-報告を受け取ってから 7 日以内に初回応答、90 日以内に修正リリースを目指す。
-修正が完了するまで脆弱性の詳細を公開しないでください。
-
----
-
 ## 認証モデル
 
 ccwin-notify の IPC は **Bearer トークン + SHA-256 ハッシュ** で保護されている。
@@ -38,10 +24,11 @@ ccwin-notify の IPC は **Bearer トークン + SHA-256 ハッシュ** で保�
 
 | パス | 内容 | 目標権限 |
 |------|------|----------|
-| `%APPDATA%\ccwin-notify\` | アプリデータディレクトリ | 現ユーザーのみフルコントロール |
+| `%APPDATA%\ccwin-notify\` | アプリデータディレクトリ (secret.token / daemon.port を保持) | 現ユーザーのみフルコントロール |
 | `%APPDATA%\ccwin-notify\secret.token` | Bearer トークン (平文) | 現ユーザーのみ読み取り可能 |
 | `%APPDATA%\ccwin-notify\daemon.port` | portfile (JSON) | 現ユーザーのみ読み取り可能 |
-| `%APPDATA%\ccwin-notify\config.toml` | 設定ファイル (Webhook URL 等を含む) | 現ユーザーのみ読み取り可能 |
+| `$XDG_CONFIG_HOME\ccwin-notify\` または `%USERPROFILE%\.config\ccwin-notify\` | 設定ファイル用ディレクトリ。`ccwin daemon` 起動時に `auth.EnsureDirACL` で DACL を強制適用 (`%APPDATA%\ccwin-notify\` と同じ規則) | 現ユーザーのみフルコントロール |
+| 上記ディレクトリ配下の `config.toml` | 設定ファイル (Webhook URL 等を含む)。`ccwin init` / `ccwin daemon` 自動生成いずれも 0600 で書き出す | 親ディレクトリ DACL に依拠して他ユーザーから保護 |
 
 ACL は Windows DACL (Dynamic Access Control List) で設定する。
 現ユーザーの SID を動的に取得し、他ユーザーからの読み取りを禁止する (D-24 / D-25)。
@@ -99,7 +86,7 @@ Webhook 送信では外部 HTTPS エンドポイントに Event データを POS
 
 | 項目 | 状態 | 対応予定 |
 |------|------|----------|
-| ACL 設定 (`secret.token` / `daemon.port` / `config.toml`) | `auth_windows.go` で実装済み (実機 DACL assert テストは未実施) | 継続サイクルで検証 |
+| ACL 設定 (`secret.token` / `daemon.port` / `config.toml` 親ディレクトリ) | `auth_windows.go` で実装済み (実機 DACL assert テストは未実施)。`%APPDATA%\ccwin-notify\` と `~/.config\ccwin-notify\` (もしくは `$XDG_CONFIG_HOME\ccwin-notify\`) の両方に DACL を強制 | 継続サイクルで検証 |
 | bind_address 単一 IP 強制 | `net.IPv4(127,0,0,1)` 完全一致で実装済み (M-03)。`::1` / `127.0.0.0/8` の他は拒否 | 解消済 |
 | Toast 実発火 | v0.1.0 実装済み (`toast_real_windows.go` / `go-toast` 依存追加済み)。CI 時は `CCWIN_NOTIFY_USE_FAKE_TOASTER=1` で FakeToaster を使用 | Windows 実機での動作確認は継続サイクルで実施 |
 | IPC は localhost 限定のため、リモートからの操作は設計上不可能 | 意図的な制限 | 変更予定なし |

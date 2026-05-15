@@ -87,7 +87,7 @@ User Gate: **PASS (条件付き)** — セキュリティ HIGH 4 件はユーザ
 ### D. 設定
 | ID | 重要度 | 判定 | 根拠 |
 |----|---|---|---|
-| D1 | BLOCKER | ✅ | TOML + `%APPDATA%/ccwin-notify/config.toml` + `--config` |
+| D1 | BLOCKER | ✅ | TOML + `$XDG_CONFIG_HOME/ccwin-notify/config.toml` (フォールバック `~/.config/ccwin-notify/config.toml`) + `--config` |
 | D2 | BLOCKER | ✅ | `defaultConfig()` で最小安全設定 |
 | D3 | BLOCKER | ✅ | `errors.As + Position.Line > 0` assert (T-D03) |
 | D4 | MUST | ✅ | 計画書 §6.1 |

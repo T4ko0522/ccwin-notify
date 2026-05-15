@@ -4,7 +4,7 @@ Windows で Claude Code のセッションイベントを通知するデーモ�
 
 Claude Code が応答を完了したり通知を出したりしたタイミングを、Windows のトースト通知・サウンド再生・Discord / Slack の Webhook で受け取れる。長時間の作業中に Claude Code の状態を見逃さなくなる。
 
-> 現在ベータ版 (v1.0.1)
+> 現在ベータ版 (v1.1.0)
 
 ---
 
@@ -13,7 +13,7 @@ Claude Code が応答を完了したり通知を出したりしたタイミン�
 Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) を受け取り、設定に応じて以下を実行する。
 
 - **Windows トースト通知** — 応答完了などをデスクトップ右下に表示
-- **サウンド再生** — お好みの WAV ファイルを再生
+- **サウンド再生** — 同梱の通知音を再生 (任意の WAV に差し替え可)
 - **Discord / Slack Webhook** — チャットに通知を投稿 (リトライ・指数バックオフ対応)
 - **ライブログ TUI** — 通知の流れをターミナルで確認
 
@@ -23,9 +23,10 @@ Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) を受け取り
 
 ## 対応環境
 
-- Windows 10 / 11 (64bit)
-
-Windows 以外では起動しない。
+- **OS**: Windows 10 / 11 (64bit) ※ Windows 以外では起動しない
+- **ターミナル**: 任意 (Windows Terminal / WezTerm / PowerShell / cmd など)
+  - ただし **`sources.wezterm` Source は WezTerm 必須**。AskUserQuestion / ExitPlanMode の即時検知 (Claude Code の組み込み UI パネル) には `wezterm.exe` をインストールし、Claude Code を WezTerm 上で起動する必要がある。
+- **Claude Code**: v2.1.x で動作確認 (Hooks API 経由 + sessionlog 監視)
 
 ---
 
@@ -40,11 +41,13 @@ scoop bucket add t4ko0522 https://github.com/t4ko0522/tap
 # 2. インストール
 scoop install ccwin
 
-# 3. 初期設定 (対話型ウィザードで音声 / Webhook URL などを設定)
-ccwin init
+# 3. (任意) Webhook など追加設定をする場合のみ ccwin init を実行
+ccwin init --discord-webhook "https://discord.com/api/webhooks/..."
 ```
 
-`ccwin init` が `%APPDATA%\ccwin-notify\config.toml` を作成する。既存ファイルがある場合は上書き確認が出る (`--force` でスキップ可)。
+config.toml は初回 `ccwin daemon` 起動時に既定値で自動生成されるため、`ccwin init` は必須ではない。
+
+`ccwin init` は defaultConfig を CLI フラグ (Webhook URL や Toast/Sound の ON/OFF など) で上書きして `%USERPROFILE%\.config\ccwin-notify\config.toml` (または `$XDG_CONFIG_HOME\ccwin-notify\config.toml`) に書き出す。既存ファイルは `--force` を付けないと上書きされない。詳細なフラグは [`CLI サブコマンド`](#cli-サブコマンド) を参照。
 
 更新は `scoop update ccwin` で行う。
 
@@ -121,9 +124,13 @@ $Input | & "C:\path\to\ccwin.exe" send --kind $Kind --stdin
 
 ## 設定ファイル
 
-設定ファイルのパス: `%APPDATA%\ccwin-notify\config.toml`
+設定ファイルのパス解決:
 
-`ccwin init` で作成できる。ファイルが存在しない場合はデフォルト値で動作する。
+1. `--config <path>` で明示指定したパス
+2. `$XDG_CONFIG_HOME\ccwin-notify\config.toml` (環境変数が設定されている場合)
+3. `%USERPROFILE%\.config\ccwin-notify\config.toml` (フォールバック)
+
+`ccwin daemon` 起動時にファイルが無ければ defaultConfig を書き出す。`ccwin init` でも生成できる (CLI フラグで上書き可)。手動で TOML を直接編集する場合も同様に動作する。なお `secret.token` と `daemon.port` は引き続き `%APPDATA%\ccwin-notify\` 配下に保存される。
 
 ### 設定例
 
@@ -134,8 +141,8 @@ log_level = "info"        # "debug" | "info" | "warn" | "error"
 enabled = true
 
 [notifiers.sound]
-enabled = false
-wav_path = ""             # 再生したい WAV ファイルのパス
+enabled = true
+wav_path = ""             # 空文字なら同梱の default.wav を使用、任意の WAV パスを指定すると差し替え
 
 [notifiers.webhook.discord]
 enabled = false
@@ -149,10 +156,14 @@ url = ""                  # https://hooks.slack.com/services/... を指定
 ### 主な設定項目
 
 - **`notifiers.toast.enabled`** — Windows トースト通知の ON/OFF
-- **`notifiers.sound.enabled` / `wav_path`** — サウンド再生の ON/OFF と WAV ファイルのパス
+- **`notifiers.sound.enabled` / `wav_path`** — サウンド再生の ON/OFF と WAV ファイルのパス (空なら同梱 WAV)
 - **`notifiers.webhook.discord.url` / `notifiers.webhook.slack.url`** — Webhook URL (必ず `https://` で始まる URL)
 
 Webhook URL はログや表示には出力されないようマスクされる。
+
+### 同梱の通知音について
+
+`internal/notifier/sound/assets/default.wav` がバイナリに `//go:embed` で取り込まれており、`wav_path` が空のときはこれを再生する。WAV を差し替えたい場合は同じパスにファイルを置いた上で再ビルドする。
 
 ---
 
@@ -160,13 +171,27 @@ Webhook URL はログや表示には出力されないようマスクされる�
 
 | サブコマンド | 説明 |
 |-------------|------|
-| `ccwin daemon` | デーモンを起動する |
-| `ccwin init` | 対話型ウィザードで `config.toml` を生成する (`--force` で既存上書き確認をスキップ) |
+| `ccwin daemon` | デーモンを起動する (config.toml 不在時は defaultConfig を自動書き出し) |
+| `ccwin init [flags]` | CLI フラグから `config.toml` を生成する (詳細は下記) |
 | `ccwin tui` | ライブログ TUI を起動する |
 | `ccwin send --kind <Kind> --stdin` | stdin の JSON を Hook イベントとしてデーモンに送信 (Hook 用) |
 | `ccwin config show` | 現在の設定を表示する |
 | `ccwin config path` | 設定ファイルのパスを表示する |
 | `ccwin version` | バージョンを表示する |
+
+### `ccwin init` フラグ
+
+| フラグ | 説明 |
+|-------|------|
+| `--force` | 既存の `config.toml` を確認なしで上書きする |
+| `--path <path>` | 出力先パスを明示指定 |
+| `--log-level <level>` | `debug` / `info` / `warn` / `error` |
+| `--toast <true\|false>` | Toast 通知の ON/OFF |
+| `--sound <true\|false>` | Sound 通知の ON/OFF |
+| `--discord-webhook <url>` | Discord Webhook URL を設定し、`discord.enabled = true` にする |
+| `--slack-webhook <url>` | Slack Webhook URL を設定し、`slack.enabled = true` にする |
+
+フラグを渡さない項目は defaultConfig の値が使われる。細かい設定 (`kind_mask` や `dispatcher.notifier_timeout` など) を変えたい場合は TOML を直接編集する。
 
 ---
 
