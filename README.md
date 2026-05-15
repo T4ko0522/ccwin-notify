@@ -1,96 +1,76 @@
 # ccwin-notify
 
-Windows 上で動作する Claude Code セッション通知デーモン。
-Claude Code の Hooks イベント (Stop / Notification / SubagentStop) を受け取り、
-Windows Toast 通知・サウンド再生・Discord / Slack Webhook への送信を行う。
+Windows で Claude Code のセッションイベントを通知するデーモン。
+
+Claude Code が応答を完了したり通知を出したりしたタイミングを、Windows のトースト通知・サウンド再生・Discord / Slack の Webhook で受け取れる。長時間の作業中に Claude Code の状態を見逃さなくなる。
+
+> 現在ベータ版 (v0.1.0)。
 
 ---
 
-## 現在の状態 (v0.1.0)
+## 何ができるか
 
-v0.1.0 はコアパッケージ・CLI サブコマンドの実装が完了した段階。
-Windows 実機での End-to-End 動作検証は未実施。
+Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) を受け取り、設定に応じて以下を実行する。
 
-**実装済みの機能 (コードレベル):**
+- **Windows トースト通知** — 応答完了などをデスクトップ右下に表示
+- **サウンド再生** — お好みの WAV ファイルを再生
+- **Discord / Slack Webhook** — チャットに通知を投稿 (リトライ・指数バックオフ対応)
+- **ライブログ TUI** — 通知の流れをターミナルで確認
 
-- `just build` でバイナリが生成される
-- `just check` (fmt → vet → test) が全パッケージ PASS
-- イベントバス (`internal/event.Bus`) — 有界キュー + drop-oldest / drop-newest / block ポリシー
-- Hooks IPC ハンドラ (`source/hooks.HandleEvents` / `HandleStream`) — ULID 付き Event を Bus に投入
-- Dispatcher — fan-out goroutine、per-Notifier セマフォ、panic リカバリー
-- HTTP Server (`internal/ipc/server`) — ReadHeaderTimeout 5s / WriteTimeout 0 (SSE 対応) で構成
-- Bearer 認証 (`internal/ipc/middleware`) — SHA-256 固定長 constant-time 比較
-- Sound Notifier (`internal/notifier/sound`) — WinMM PlaySoundW による WAV 非同期再生
-- Webhook Notifier (`internal/notifier/webhook`) — Discord / Slack、指数バックオフ + Retry-After 対応
-- Toast Notifier — `go-toast` を使った実 Toaster 実装済み (`toast_real_windows.go`)。CI 時は `CCWIN_NOTIFY_USE_FAKE_TOASTER=1` で FakeToaster に切り替え可能
-- SSE Hub — TUI 向けライブログストリーム
-- TUI Model — bubbletea による Elm アーキテクチャ実装
-- 設定ファイル読み込み / バリデーション (`%APPDATA%/ccwin-notify/config.toml`)
-- `apiclient` インターフェース — send CLI / TUI が共有するデーモン API クライアント
-- `internal/auth` — secret.token 生成・Windows ACL 設定 (LoadOrCreate / EnsureDirACL、fail-closed 設計)
-- CLI サブコマンド (`daemon` / `send` / `tui` / `config` / `version`) — 全て結線済み
-
-**未検証の機能 (継続サイクルで対応予定):**
-
-- Windows 実機での End-to-End 検証 (Toast 発火 + Hooks → Webhook フロー)
-- Toast AUMID 整備 (スタートメニューへのショートカット登録 — Phase 5 以降)
-- Windows 実機での End-to-End 動作検証 (Toast 発火・Sound 再生・Webhook 送信を含む)
-- winget / scoop によるパッケージ配布
+各通知先は個別に有効化・無効化できる。
 
 ---
 
 ## 対応環境
 
-- **OS**: Windows 10 / 11 (amd64)
-- Windows 以外の OS では起動時に即座にエラーで終了する (`GOOS != "windows"` チェック)。ビルドは任意の OS で可能。
+- Windows 10 / 11 (64bit)
+
+Windows 以外では起動しない。
 
 ---
 
-## 前提ツール
+## インストール
 
-| ツール | バージョン | 役割 |
-|--------|------------|------|
-| [mise](https://mise.jdx.dev/) | 任意 (最新安定版推奨) | Go / just のバージョン管理 |
-| Go | 1.26.3 (`mise` が自動導入) | ビルド |
-| just | 1.51.0 (`mise` が自動導入) | タスクランナー |
-
----
-
-## インストール (開発者向け)
+### Scoop でインストール
 
 ```powershell
-# 1. リポジトリをクローン
-git clone https://github.com/t4ko0522/ccwin-notify
-cd ccwin-notify
+# 1. tap (bucket) を追加
+scoop bucket add t4ko0522 https://github.com/t4ko0522/tap
 
-# 2. Go と just を導入
-mise install
+# 2. インストール
+scoop install ccwin-notify
 
-# 3. ビルド
-just build
-# => bin/ccwin-notify.exe が生成される
+# 3. 初期設定 (対話型ウィザードで音声 / Webhook URL などを設定)
+ccwin-notify init
 ```
+
+`ccwin-notify init` が `%APPDATA%\ccwin-notify\config.toml` を作成する。既存ファイルがある場合は上書き確認が出る (`--force` でスキップ可)。
+
+更新は `scoop update ccwin-notify` で行う。
 
 ---
 
-## クイックスタート
+## 使い方
 
-> **注意**: v0.1.0 ではコードが実装済みだが Windows 実機での End-to-End 動作検証は未実施。
-> Toast AUMID が設定されていない環境では通知が「PowerShell」名義で表示される場合がある。
-
-### 起動フロー
+### 1. デーモンを起動する
 
 ```powershell
-# Step 1: デーモンを別ターミナルで起動
-.\bin\ccwin-notify.exe daemon
-
-# Step 2: 別ターミナルで TUI を起動してライブログを確認
-.\bin\ccwin-notify.exe tui
+ccwin-notify daemon
 ```
 
-### Claude Code Hooks の設定
+このターミナルは起動したままにする。閉じるとデーモンも止まる。
 
-`~/.claude/settings.json` に以下を追加する:
+### 2. (任意) ライブログを確認する
+
+別のターミナルで TUI を起動すると、通知の流れがリアルタイムで見える。
+
+```powershell
+ccwin-notify tui
+```
+
+### 3. Claude Code 側に Hooks を設定する
+
+`~/.claude/settings.json` に以下を追加する。`C:\path\to\hook.ps1` と `C:\path\to\ccwin-notify.exe` は実際のパスに置き換える (Scoop インストールなら `ccwin-notify.exe` は `~\scoop\apps\ccwin-notify\current\ccwin-notify.exe`)。
 
 ```jsonc
 {
@@ -120,16 +100,59 @@ just build
 }
 ```
 
-`hook.ps1`:
+`hook.ps1` の中身:
 
 ```powershell
 param([string]$Kind)
-# stdin の JSON を ccwin-notify send に渡す
 $Input | & "C:\path\to\ccwin-notify.exe" send --kind $Kind --stdin
 ```
 
-> `--stdin` フラグを使うことで、PowerShell の `echo` 経由で発生するバックスラッシュ破壊問題 (Issue #44482) を回避している。
-> JSON のパースは Go CLI 側で行われる。
+これで Claude Code が応答を完了したタイミング (`Stop`) などに通知が飛ぶようになる。
+
+### Hook イベント種別
+
+| Kind | 発火タイミング |
+|------|---------------|
+| `Stop` | Claude Code がレスポンスを完了したとき |
+| `Notification` | Claude Code が通知を出したとき |
+| `SubagentStop` | サブエージェントが完了したとき |
+
+---
+
+## 設定ファイル
+
+設定ファイルのパス: `%APPDATA%\ccwin-notify\config.toml`
+
+`ccwin-notify init` で作成できる。ファイルが存在しない場合はデフォルト値で動作する。
+
+### 設定例
+
+```toml
+log_level = "info"        # "debug" | "info" | "warn" | "error"
+
+[notifiers.toast]
+enabled = true
+
+[notifiers.sound]
+enabled = false
+wav_path = ""             # 再生したい WAV ファイルのパス
+
+[notifiers.webhook.discord]
+enabled = false
+url = ""                  # https://discord.com/api/webhooks/... を指定
+
+[notifiers.webhook.slack]
+enabled = false
+url = ""                  # https://hooks.slack.com/services/... を指定
+```
+
+### 主な設定項目
+
+- **`notifiers.toast.enabled`** — Windows トースト通知の ON/OFF
+- **`notifiers.sound.enabled` / `wav_path`** — サウンド再生の ON/OFF と WAV ファイルのパス
+- **`notifiers.webhook.discord.url` / `notifiers.webhook.slack.url`** — Webhook URL (必ず `https://` で始まる URL)
+
+Webhook URL はログや表示には出力されないようマスクされる。
 
 ---
 
@@ -137,280 +160,48 @@ $Input | & "C:\path\to\ccwin-notify.exe" send --kind $Kind --stdin
 
 | サブコマンド | 説明 |
 |-------------|------|
-| `daemon` | デーモンを起動する。多重起動は Windows Mutex で防止 |
-| `send --kind <Kind> --stdin` | stdin の JSON を Hook イベントとしてデーモンに送信 |
-| `tui` | ライブログ TUI を起動する |
-| `config show` | 現在の設定を表示する |
-| `config path` | 設定ファイルのパスを表示する |
-
-### Hook イベント種別
-
-| Kind | 発火タイミング |
-|------|---------------|
-| `Stop` | Claude Code がレスポンスを完了したとき |
-| `Notification` | Claude Code が通知を送出したとき |
-| `SubagentStop` | サブエージェントが完了したとき |
-
----
-
-## 設定ファイル
-
-設定ファイルのデフォルトパス: `%APPDATA%\ccwin-notify\config.toml`
-
-ファイルが存在しない場合はデフォルト値で動作する。
-
-### 設定例
-
-```toml
-log_level = "info"        # "debug" | "info" | "warn" | "error"
-log_format = "text"       # "text" | "json"
-shutdown_timeout = "5s"   # graceful shutdown 上限 (C4)
-
-[queue]
-capacity = 256
-policy = "drop-oldest"    # "drop-oldest" | "drop-newest" | "block"
-
-[dispatcher]
-max_concurrent_per_notifier = 4  # per-Notifier の同時実行数上限
-notifier_timeout = "3s"          # per-attempt タイムアウト (E4)
-
-[ipc]
-bind_address = "127.0.0.1"   # ループバックアドレス必須 (セキュリティ要件 A6)
-
-[sources.hooks]
-enabled = true
-
-[sources.process]
-enabled = false    # true にすると claude.exe を定期ポーリングし PID 消失で Stop event を発火 (Hooks フォールバック)
-interval = "2s"
-process_name = "claude.exe"
-idle_threshold = "60s"
-
-[notifiers.toast]
-enabled = true
-
-[notifiers.sound]
-enabled = false
-wav_path = ""
-
-[notifiers.webhook.discord]
-enabled = false
-url = ""           # https:// で始まる URL が必須
-timeout = "3s"
-max_retries = 3
-
-[notifiers.webhook.slack]
-enabled = false
-url = ""           # https:// で始まる URL が必須
-timeout = "3s"
-max_retries = 3
-```
-
-### バリデーション規則
-
-- `ipc.bind_address`: `127.0.0.1` 完全一致のみ受理 (A6 / I2)。`::1` や `127.0.0.0/8` 内の他アドレスは拒否される。
-- `notifiers.webhook.*.url` は URL が空でなければ常に `https://` 必須 (enabled に関わらず検証)。`enabled = true` のときは URL が空文字なら起動失敗。エラーメッセージには URL 平文を含めない (H-03 / I4)。
-- `queue.capacity` は 1 以上
-- `queue.policy` は `drop-oldest` / `drop-newest` / `block` のいずれか
-- `dispatcher.max_concurrent_per_notifier` は 1 以上 256 以下
-- `dispatcher.notifier_timeout` は 100ms 以上 5 分以下
-
----
-
-## 動作確認コマンド
-
-```powershell
-# 全パッケージのテストと静的解析
-just check
-
-# テストのみ
-just test
-
-# race detector 付きテスト
-just test-race
-
-# カバレッジレポート生成 (coverage.html)
-just cover
-
-# ビルドのみ
-just build
-```
-
----
-
-## パッケージ構成
-
-```
-ccwin-notify/
-├── cmd/ccwin-notify/        # エントリポイント (サブコマンドルーティング)
-└── internal/
-    ├── event/               # Event 型・EventKind・Bus・DropPolicy
-    ├── secret/              # SecretString (slog LogValuer + MarshalJSON によるマスク)
-    ├── clock/               # Clock 抽象 (Real / FakeClock)
-    ├── config/              # TOML 設定読み込み・バリデーション
-    ├── platform/            # OS プラットフォーム固有機能
-    ├── notifier/            # Notifier インターフェース・FakeNotifier
-    │   ├── toast/           # Windows Toast Notifier (go-toast 使用 / CI 時は CCWIN_NOTIFY_USE_FAKE_TOASTER=1 で FakeToaster)
-    │   ├── sound/           # WinMM PlaySoundW による WAV 非同期再生
-    │   └── webhook/         # Discord / Slack Webhook 送信 (指数バックオフ + Retry-After 対応)
-    ├── daemon/              # Dispatcher (fan-out / WaitGroup / panic recovery)
-    ├── send/                # Hook stdin JSON → Event 正規化 (NormalizeHook)
-    ├── tui/                 # bubbletea TUI Model (Elm アーキテクチャ)
-    ├── apiclient/           # デーモン API クライアント (SSE 再接続含む)
-    ├── auth/                # secret.token 生成・Windows ACL 設定 (LoadOrCreate / EnsureDirACL)
-    ├── logging/             # slog text/json ハンドラ構築
-    ├── ipc/
-    │   ├── client/          # portfile 読み込み・Bearer HTTP クライアント
-    │   ├── middleware/       # Bearer 認証 (SHA-256 constant-time 比較)
-    │   ├── server/          # HTTP サーバー集約・RegisterRoute
-    │   └── sse/             # SSE Hub (Publish / Subscribe / Close)
-    └── source/
-        ├── hooks/           # Hooks IPC ハンドラ (HTTP server は非所有)
-        └── process/         # プロセス監視ポーリング (gopsutil + claude.exe PID 消失検知)
-
-### アーキテクチャ概要
-
-パッケージ間の主要な依存方向を示す。詳細は `docs/plans/2026-05-14-ccwin-notify-bootstrap/2_plan.md` を参照。
-
-```
-[Claude Code Hooks]
-        |
-        v (HTTP POST / stdin JSON)
-  send / source/hooks        <-- ipc/middleware (Bearer 認証)
-        |
-        v
-  event.Bus (bounded queue)
-        |
-        v
-  daemon.Dispatcher (fan-out goroutine + panic recovery)
-     |        |        |
-     v        v        v
-  notifier/ notifier/ notifier/
-  toast    sound    webhook
-
-横断:
-  config  --> 全パッケージ (設定注入)
-  secret  --> config / logging (SecretString マスク)
-  clock   --> daemon / source/process (FakeClock でテスト決定性確保)
-  ipc/sse --> apiclient / tui (SSE ライブログストリーム)
-  platform --> OS チェック (main での起動拒否)
-```
-
----
-
-## セキュリティ設計
-
-詳細は [docs/SECURITY.md](docs/SECURITY.md) を参照。
-
-- IPC は `127.0.0.1` にバインドし、外部ネットワークには公開しない (A6)
-- Bearer トークンは SHA-256 ハッシュ化して 32 byte 固定長で `subtle.ConstantTimeCompare` 比較 (D-39)
-  タイミング攻撃によるトークン長の推定を防ぐ
-- Webhook URL はログ・JSON API レスポンスどちらにも出力しない (`SecretString` が slog LogValuer + MarshalJSON で自動マスク)
-- トークンファイル ACL: `internal/auth.LoadOrCreate` / `EnsureDirACL` で実装済み (Windows DACL + fail-closed 設計)
+| `ccwin-notify daemon` | デーモンを起動する |
+| `ccwin-notify init` | 対話型ウィザードで `config.toml` を生成する (`--force` で既存上書き確認をスキップ) |
+| `ccwin-notify tui` | ライブログ TUI を起動する |
+| `ccwin-notify send --kind <Kind> --stdin` | stdin の JSON を Hook イベントとしてデーモンに送信 (Hook 用) |
+| `ccwin-notify config show` | 現在の設定を表示する |
+| `ccwin-notify config path` | 設定ファイルのパスを表示する |
+| `ccwin-notify version` | バージョンを表示する |
 
 ---
 
 ## トラブルシューティング
 
-以下の各項目はコードが実装済みであることを前提とした案内。Windows 実機での End-to-End 動作検証は未実施。
+### トースト通知が表示されない
 
-### portfile が stale のまま残っている (デーモンが起動できない)
+- 設定で `notifiers.toast.enabled = true` になっているか確認する
+- Windows の通知設定 (システム → 通知) で通知が許可されているか確認する
+- 通知が「PowerShell」名義で表示される場合がある (今後のリリースで改善予定)
 
-デーモンが異常終了すると `%APPDATA%\ccwin-notify\daemon.port` が残る場合がある。
+### Webhook 通知が届かない
+
+- `notifiers.webhook.*.url` が `https://` で始まる正しい URL になっているか確認する
+- ファイアウォール / プロキシが outbound HTTPS を遮断していないか確認する
+- 設定ファイルの `log_level` を `"debug"` にしてデーモンを再起動し、ログでエラー内容を確認する
+
+### デーモンが起動できない / "portfile が残っている" 系のエラー
+
+デーモンが異常終了した場合に発生する。次の手順で復旧する。
 
 ```powershell
-# portfile を確認 (PID が存在するか)
-Get-Content "$env:APPDATA\ccwin-notify\daemon.port"
-
-# PID に対応するプロセスが存在しなければ portfile を削除
+# portfile を削除
 Remove-Item "$env:APPDATA\ccwin-notify\daemon.port"
 
 # デーモンを再起動
-.\bin\ccwin-notify.exe daemon
+ccwin-notify daemon
 ```
 
-### Bearer トークン不一致で 401 が返る
+### `subcommand required` と表示されて終了する
 
-`send` CLI が読む `secret.token` とデーモンが保持するトークンが異なる場合に発生する。
-
-- デーモンを再起動するとトークンが再生成されるため、その後に `send` が自動的に最新のトークンを読み込む。
-- `%APPDATA%\ccwin-notify\secret.token` が存在しない場合は、デーモン起動時に `internal/auth.LoadOrCreate` が自動生成する。
-
-### Toast が表示されない
-
-以下のことを確認する (コードが実装済みであることを前提とした手順):
-
-- `CCWIN_NOTIFY_USE_FAKE_TOASTER=1` 環境変数が設定されている場合は FakeToaster が使われ実 Toast は発火しない。この環境変数を削除してデーモンを再起動する。
-- AUMID (アプリ識別子) が未設定の環境では通知が「PowerShell」名義で表示される場合がある。
-  スタートメニューへのショートカット登録が必要 (Phase 5 以降で対応予定)。
-- Sound 再生で WAV ファイルが見つからない場合は、`notifiers.sound.wav_path` に有効なパスを設定すること。
-
-### Webhook 送信が失敗する
-
-- `notifiers.webhook.discord.url` または `notifiers.webhook.slack.url` が `https://` で始まっていることを確認する。
-- ファイアウォールまたはプロキシが outbound HTTPS を遮断していないか確認する。
-- `log_level = "debug"` に設定してデーモンを再起動し、ログで詳細なエラーを確認する。
-
-### "subcommand required" が表示される
-
-引数なしで `ccwin-notify` を実行すると必ずこのメッセージで終了する。`daemon` / `send` / `tui` / `config` / `version` のいずれかを指定すること。
-
-### go test が失敗する
-
-```powershell
-# Go のバージョンを確認
-go version
-# => go1.26.3 windows/amd64 が期待値
-
-# mise で正しいバージョンを使う
-mise install
-mise exec -- go test ./...
-```
-
----
-
-## 制限事項
-
-- Windows 10 / 11 (amd64) 専用。Linux / macOS では動作しない
-- GUI 設定画面・システムトレイ常駐は非スコープ
-- 自動アップデート機構なし
-- パッケージ配布 (winget / scoop) は未対応
-
-### 既知の実装側 TODO (継続サイクルで対応予定)
-
-以下は設計で決定済みだが v0.1.0 では未対応の項目:
-
-- **bind_address 検証強化**: `config.Validate()` は現状 `IsLoopback()` 判定 (IPv6 `::1` や `127.0.0.2` も通過)。設計仕様 §6.2 は `127.0.0.1` 単一 IP 固定のため、実装を IP 完全一致チェックに修正する必要がある
-- **Toast AUMID 整備**: スタートメニューへのショートカット登録。Phase 5 以降で対応予定
-- **プロセス監視** (`internal/source/process`): 実装済み。デフォルトは無効。`sources.process.enabled = true` で有効化すると Hooks の取りこぼしを補完する
-
----
-
-## 開発者向け情報
-
-### TDD フロー
-
-本プロジェクトは TDD (探索 → Red → Green → Refactor) で開発している。
-各サイクルの設計判断は `docs/plans/2026-05-14-ccwin-notify-bootstrap/2_plan.md` を参照。
-
-### race detector
-
-全テストは `-race` フラグ付きで PASS することを確認している:
-
-```powershell
-just test-race
-```
-
-### コントリビュート
-
-1. `just check` を通してから PR を作成する
-2. 新しいパッケージには godoc コメント (`Package xxx は ...` で始まる) を必ず書く。
-   既存 `.go` ファイル冒頭にパッケージコメントがある場合は `doc.go` を別途作る必要はない
-3. テストは `_test.go` に書き、依存は `FakeXxx` 型で注入する
-4. TDD サイクル中に書いた「Red 段階」などのコメントは Green 通過後に削除する。リリースブランチには残さない
+`ccwin-notify` を引数なしで実行するとこのメッセージが出る。`daemon` / `init` / `tui` / `config` / `version` のいずれかを必ず指定する。
 
 ---
 
 ## ライセンス
 
-LICENSE 未確定 — リポジトリ owner と要相談
+https://github.com/T4ko0522/ccwin-notify/blob/main/LICENSE
