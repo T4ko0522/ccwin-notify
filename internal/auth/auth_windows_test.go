@@ -6,11 +6,16 @@
 package auth_test
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/t4ko0522/ccwin-notify/internal/auth"
 )
@@ -78,6 +83,80 @@ func TestLoadOrCreate_TokenInFile(t *testing.T) {
 		t.Errorf("ファイル内容 %q と Token %q が不一致", fileContent, tok.Reveal())
 	}
 }
+
+// captureLogs は slog.Default() の出力を bytes.Buffer に切り替えて取得する。
+func captureLogs(t *testing.T) (*bytes.Buffer, func()) {
+	t.Helper()
+	prev := slog.Default()
+	buf := &bytes.Buffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	return buf, func() { slog.SetDefault(prev) }
+}
+
+// H-02: 既存ファイル + DACL OK → INFO ログ "DACL ok"
+func TestLoadOrCreate_ExistingToken_DACL_OK_Logs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.token")
+
+	if _, err := auth.LoadOrCreate(context.Background(), path); err != nil {
+		t.Fatalf("LoadOrCreate (create): %v", err)
+	}
+
+	buf, restore := captureLogs(t)
+	defer restore()
+
+	if _, err := auth.LoadOrCreate(context.Background(), path); err != nil {
+		t.Fatalf("LoadOrCreate (reload): %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "DACL ok") {
+		t.Errorf("INFO 'DACL ok' ログが含まれない: %s", out)
+	}
+	if strings.Contains(out, "DACL drift detected") {
+		t.Errorf("drift 検出されないはず: %s", out)
+	}
+}
+
+// H-02: 既存ファイル + DACL drift → WARN + 修復ログ
+func TestLoadOrCreate_ExistingToken_DACL_Drift_RepairLogs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.token")
+
+	if _, err := auth.LoadOrCreate(context.Background(), path); err != nil {
+		t.Fatalf("LoadOrCreate (create): %v", err)
+	}
+
+	// DACL を意図的に drift させる: NULL DACL を設定 (allow-all = 全員アクセス可)
+	secInfo := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION)
+	// nil DACL を SetNamedSecurityInfo で渡すには PROTECTED フラグ無しで明示
+	emptySD, err := windows.NewSecurityDescriptor()
+	if err != nil {
+		t.Fatalf("NewSecurityDescriptor: %v", err)
+	}
+	if err := emptySD.SetDACL(nil, true, false); err != nil {
+		t.Fatalf("SetDACL: %v", err)
+	}
+	dacl, _, _ := emptySD.DACL()
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, secInfo, nil, nil, dacl, nil); err != nil {
+		t.Fatalf("SetNamedSecurityInfo (drift): %v", err)
+	}
+
+	buf, restore := captureLogs(t)
+	defer restore()
+
+	if _, err := auth.LoadOrCreate(context.Background(), path); err != nil {
+		t.Fatalf("LoadOrCreate after drift: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "DACL drift detected") {
+		t.Errorf("WARN 'DACL drift detected' が出力されない: %s", out)
+	}
+	if !strings.Contains(out, "DACL repaired") {
+		t.Errorf("INFO 'DACL repaired' が出力されない: %s", out)
+	}
+}
+
+var _ = io.Discard // bytes / io 未使用警告回避
 
 // T-134 / D-25: EnsureDirACL がディレクトリを作成し ACL を適用する
 func TestEnsureDirACL_CreatesDir(t *testing.T) {

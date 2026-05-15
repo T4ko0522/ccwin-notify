@@ -9,8 +9,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -36,9 +38,25 @@ func LoadOrCreate(ctx context.Context, path string) (Token, error) {
 
 	// 既存ファイルを読込 — 末尾改行等を除去してから使用 (M3R-04: daemon/client 両方で TrimSpace)
 	tok := Token(secret.SecretString(strings.TrimSpace(string(data))))
-	// ACL 再適用 (修復)
-	if err := applyFileACL(path); err != nil {
-		return "", fmt.Errorf("auth: ACL repair failed for existing token: %w", err)
+	// DACL を検証 — drift 検出時のみ修復し、修復後に再検証して失敗なら fail-closed (H-02)
+	drift, reason, verifyErr := verifyFileACL(path)
+	if verifyErr != nil {
+		slog.Default().Warn("auth: token file DACL verification error, attempting repair",
+			"path", path, "error", verifyErr.Error())
+		drift = true
+	}
+	if drift {
+		slog.Default().Warn("auth: token file DACL drift detected, repairing",
+			"path", path, "reason", reason)
+		if err := applyFileACL(path); err != nil {
+			return "", fmt.Errorf("auth: ACL repair failed for existing token: %w", err)
+		}
+		if drift2, reason2, err := verifyFileACL(path); err != nil || drift2 {
+			return "", fmt.Errorf("auth: ACL repair did not converge (drift=%v reason=%q err=%v)", drift2, reason2, err)
+		}
+		slog.Default().Info("auth: token file DACL repaired", "path", path)
+	} else {
+		slog.Default().Info("auth: token file DACL ok", "path", path)
 	}
 	return tok, nil
 }
@@ -111,6 +129,66 @@ func applyFileACL(path string) error {
 	}
 
 	return nil
+}
+
+// verifyFileACL は path の DACL が期待値 (現ユーザー SID のみ FA + protected) と一致するか検査する (H-02)。
+// 戻り値: drift = 期待と異なる、reason = 違いの説明、err = 検査自体が失敗 (drift=true 扱い)。
+func verifyFileACL(path string) (drift bool, reason string, err error) {
+	sd, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return true, "GetNamedSecurityInfo failed", fmt.Errorf("GetNamedSecurityInfo: %w", err)
+	}
+
+	control, _, err := sd.Control()
+	if err != nil {
+		return true, "Control failed", fmt.Errorf("Control: %w", err)
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return true, "DACL not protected (inheritable)", nil
+	}
+
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return true, "DACL access failed", fmt.Errorf("DACL: %w", err)
+	}
+	if dacl == nil {
+		return true, "DACL is null (allow-all)", nil
+	}
+
+	if dacl.AceCount != 1 {
+		return true, fmt.Sprintf("DACL has %d ACEs, want 1", dacl.AceCount), nil
+	}
+
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(dacl, 0, &ace); err != nil {
+		return true, "GetAce(0) failed", fmt.Errorf("GetAce: %w", err)
+	}
+	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+		return true, fmt.Sprintf("ACE type %d is not ACCESS_ALLOWED", ace.Header.AceType), nil
+	}
+
+	wantSID, err := currentUserSID()
+	if err != nil {
+		return true, "currentUserSID failed", fmt.Errorf("currentUserSID: %w", err)
+	}
+	wantStr := wantSID.String()
+	gotSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+	gotStr := gotSID.String()
+	if gotStr != wantStr {
+		return true, fmt.Sprintf("ACE SID %s != current user %s", gotStr, wantStr), nil
+	}
+	// GENERIC_ALL を SetNamedSecurityInfo で渡すと OS が標準権限へ展開する (= FILE_ALL_ACCESS 0x1F01FF)。
+	// どちらでも「全許可」とみなす。
+	const fileAllAccess = 0x1F01FF
+	mask := uint32(ace.Mask)
+	if mask&windows.GENERIC_ALL == 0 && mask&fileAllAccess != fileAllAccess {
+		return true, fmt.Sprintf("ACE mask 0x%x missing full access", mask), nil
+	}
+	return false, "ok", nil
 }
 
 // currentUserSID は現プロセスの実行ユーザー SID を動的取得する (D-24)。
