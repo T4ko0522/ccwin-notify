@@ -4,6 +4,7 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,22 @@ import (
 	"github.com/t4ko0522/ccwin-notify/internal/notifier"
 	"github.com/t4ko0522/ccwin-notify/internal/secret"
 )
+
+// newDefaultClient は Webhook 送信用の http.Client を返す (M-01)。
+// - CheckRedirect: リダイレクト禁止 (SSRF 耐性)
+// - TLSClientConfig.MinVersion: TLS 1.2 強制
+// cfg.HTTPClient が nil のときに使う。テストで Server.Client() を渡された場合は
+// テスト側の Transport (TLS なし or InsecureSkipVerify) をそのまま使う。
+func newDefaultClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
+}
 
 // redactedURLError は url.Error 由来のメッセージから URL 文字列を除去した wrapper。
 // errors.Is / errors.As でチェーンを保持しつつ、Error() からは URL を出さない (H-03)。
@@ -71,7 +88,7 @@ var _ notifier.Notifier = (*slackNotifier)(nil)
 func NewDiscord(cfg Config) notifier.Notifier {
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{}
+		hc = newDefaultClient()
 	}
 	return &discordNotifier{cfg: cfg, http: hc}
 }
@@ -81,7 +98,7 @@ func NewDiscord(cfg Config) notifier.Notifier {
 func NewSlack(cfg Config) notifier.Notifier {
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{}
+		hc = newDefaultClient()
 	}
 	return &slackNotifier{cfg: cfg, http: hc}
 }
@@ -176,7 +193,8 @@ func postWithRetry(ctx context.Context, hc *http.Client, cfg Config, payload int
 			continue
 		}
 
-		if resp.StatusCode >= 400 {
+		// 3xx はリダイレクト拒否 (M-01 / SSRF 耐性) で resp が返るが成功扱いしない
+		if resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("webhook: HTTP %d on attempt %d", resp.StatusCode, attempt+1)
 			continue
 		}

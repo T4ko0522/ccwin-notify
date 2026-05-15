@@ -199,6 +199,40 @@ func TestNotifier_5xx_ReturnsError(t *testing.T) {
 	}
 }
 
+// M-01: Webhook HTTP Client は redirect (3xx) を追わずエラーを返す (SSRF 耐性)
+func TestNotifier_RedirectDisallowed(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, "/other", http.StatusFound)
+			return
+		}
+		// /other に到達してしまうと redirect が追われたことになる → テスト失敗
+		t.Errorf("redirect が追われた: path=%s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	cfg := webhook.Config{
+		URL:        secret.SecretString(srv.URL + "/redirect"),
+		Timeout:    500 * time.Millisecond,
+		MaxRetries: 0,
+		// 既定 Client (CheckRedirect=ErrUseLastResponse) を使うため HTTPClient は nil
+	}
+	n := webhook.NewDiscord(cfg)
+
+	err := n.Notify(context.Background(), testEvent(event.KindStop, "t", "b"))
+	// 302 が返るので 4xx/5xx パスとして「post 1 attempt 失敗」になる
+	if err == nil {
+		t.Errorf("redirect を 4xx 扱いせず成功: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("hits: got %d, want 1 (redirect が追われていないこと)", hits.Load())
+	}
+}
+
 // H-03: hc.Do が *url.Error を返した場合、エラーメッセージに URL 文字列が含まれない
 func TestNotifier_DialFailure_URLNotInError(t *testing.T) {
 	t.Parallel()
