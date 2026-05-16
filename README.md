@@ -1,8 +1,8 @@
 # ccwin-notify
 
-**Claude Code (Windows) の "応答完了" を見逃さないための通知デーモン。**
-
-長時間タスクを Claude Code に任せていると、応答が返ってきたことに気付かず時間を無駄にしがち。ccwin-notify は Claude Code の Hooks を受け取り、Windows トースト・通知音・Discord / Slack Webhook で「完了したよ」を即座に知らせる。
+Windows版 Claude Codeのhooksは**非常に不安定**で通知を送信するshell scriptを書いても通知を逃すことが多い。  
+そこで今回の **ccwin-notify** を使用してください。
+ccwin-notify は Claude Code の Hooks を受け取り、Windows トースト・通知音などで「完了したよ」を即座に知らせる。
 
 ---
 
@@ -10,15 +10,12 @@
 
 - **Windows 10 / 11** で Claude Code を使っている
 - 長いタスクを投げて別作業をしている間に、応答完了を **トースト / 音 / Discord / Slack** で受け取りたい
-- (任意) **WezTerm** ユーザーで、`AskUserQuestion` や `ExitPlanMode` のような Claude Code の組み込み UI パネルにも即時反応してほしい
-
-> **WezTerm でない人も使えます。** WezTerm が必要なのは「組み込み UI パネルの即時検知」だけで、`Stop` / `Notification` / `SubagentStop` の通知は任意のターミナル (Windows Terminal / PowerShell / cmd など) で動く。
+-  
+> `AskUserQuestion` や `ExitPlanMode` のような Claude Code の組み込み UI パネル検知システムはWezTermのユーザーのみ利用可能です。
 
 ---
 
 ## できること
-
-Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) と sessionlog 監視を組み合わせて、以下を実行する。
 
 | 通知先 | 説明 |
 |--------|------|
@@ -28,23 +25,7 @@ Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) と sessionlog 
 | **Slack Webhook** | チャットに投稿 (リトライ・指数バックオフ対応) |
 | **ライブログ TUI** | 通知の流れをターミナルで確認 |
 
-各通知先は config で個別に ON/OFF できる。
-
----
-
-## 仕組み (ざっくり)
-
-```
-Claude Code ──[Hooks]──> ccwin send ──> ccwin daemon ──> Toast / Sound / Webhook
-              (Stop など)                   ▲
-                                            │
-                              WezTerm + sessionlog Source
-                              (AskUserQuestion 等を即時検知)
-```
-
-- `ccwin daemon` を常駐させておく
-- Claude Code 側から Hook 経由で `ccwin send` を叩く
-- daemon が設定に従って各通知先に配信する
+各通知先は config で個別に ON/OFF
 
 ---
 
@@ -64,70 +45,11 @@ scoop install ccwin
 
 更新は `scoop update ccwin`。
 
-> **`ccwin init` は必須ではない。** config.toml は次の `ccwin daemon` 起動時に既定値で自動生成される。Webhook を最初から有効化したい場合だけ `ccwin init --discord-webhook "..."` のように使う (詳細は [CLI サブコマンド](#cli-サブコマンド) を参照)。
-
 ### Step 2. デーモンを起動
 
-```powershell
-ccwin daemon
-```
+#### Claude Code 起動時にデーモンを自動起動する (任意)
 
-このターミナルは開いたままにする。閉じるとデーモンも止まる。
-
-### Step 3. Claude Code に Hooks を設定
-
-`~/.claude/settings.json` に以下を追加する。`C:\path\to\hook.ps1` と `C:\path\to\ccwin.exe` は実際のパスに置き換える (Scoop インストールなら `ccwin.exe` は `~\scoop\apps\ccwin\current\ccwin.exe`)。
-
-```jsonc
-{
-  "hooks": {
-    "Stop": [
-      {
-        "type": "command",
-        "command": "powershell -NoProfile -File C:\\path\\to\\hook.ps1 Stop",
-        "async": true
-      }
-    ],
-    "Notification": [
-      {
-        "type": "command",
-        "command": "powershell -NoProfile -File C:\\path\\to\\hook.ps1 Notification",
-        "async": true
-      }
-    ],
-    "SubagentStop": [
-      {
-        "type": "command",
-        "command": "powershell -NoProfile -File C:\\path\\to\\hook.ps1 SubagentStop",
-        "async": true
-      }
-    ]
-  }
-}
-```
-
-`hook.ps1` の中身:
-
-```powershell
-param([string]$Kind)
-$Input | & "C:\path\to\ccwin.exe" send --kind $Kind --stdin
-```
-
-これで Claude Code が応答完了したタイミング (`Stop`) などにトースト・音・Webhook が飛ぶ。
-
-### (任意) ライブログを見る
-
-別ターミナルで TUI を起動すると、通知の流れがリアルタイムで見える。
-
-```powershell
-ccwin tui
-```
-
----
-
-## Claude Code 起動時にデーモンを自動起動する (任意)
-
-毎回手動で `ccwin daemon` を立ち上げるのが面倒な場合は、Claude Code の `SessionStart` Hook でバックグラウンド起動させられる。Step 3 の Hook 設定に `SessionStart` を足して、`~/.claude/settings.json` をまとめると以下のようになる。
+毎回手動で `ccwin daemon` を立ち上げるのが面倒な場合は、Claude Code の `SessionStart` Hook でバックグラウンド起動させられる。`~/.claude/settings.json` は以下のようになる。
 
 ```jsonc
 {
@@ -164,6 +86,13 @@ ccwin tui
 }
 ```
 
+`hook.ps1` の中身:
+
+```powershell
+param([string]$Kind)
+$Input | & "C:\path\to\ccwin.exe" send --kind $Kind --stdin
+```
+
 `ccwin-autostart.ps1` の中身:
 
 ```powershell
@@ -182,17 +111,6 @@ if (-not (Test-Path $exe)) { $exe = "ccwin" }
 Start-Process -FilePath $exe -ArgumentList "daemon" -WindowStyle Hidden
 ```
 
-### ポイント
-
-- **`async: true`** — Claude Code 側のセッション開始をブロックしない
-- **`-WindowStyle Hidden`** — コンソールウィンドウを出さずに常駐
-- **portfile による二重起動防止** — 既にデーモンが動いていれば何もしない
-- **PATH 解決のフォールバック** — Scoop 以外でインストールした場合も `ccwin` が PATH にあれば動く
-
-> daemon が異常終了して portfile が残った場合は自動起動がスキップされる。その場合は [トラブルシューティング](#デーモンが起動できない--portfile-が残っている-系のエラー) の手順で portfile を削除する。
-
----
-
 ## Hook イベント種別
 
 | Kind | 発火タイミング |
@@ -205,8 +123,7 @@ Start-Process -FilePath $exe -ArgumentList "daemon" -WindowStyle Hidden
 
 ## 対応環境
 
-- **OS**: Windows 10 / 11 (64bit) — **Windows 専用**。他 OS では起動しない
-- **ターミナル**: 任意 (Windows Terminal / WezTerm / PowerShell / cmd など)
+- **OS**: Windows 10 / 11 (64bit)
 - **Claude Code**: v2.1.x で動作確認 (Hooks API + sessionlog 監視)
 
 ### WezTerm 限定機能
@@ -264,7 +181,7 @@ Webhook URL はログや表示で自動的にマスクされる。
 
 ### 同梱の通知音
 
-`internal/notifier/sound/assets/default.wav` がバイナリに `//go:embed` で取り込まれており、`wav_path` が空のときはこれを再生する。WAV を差し替えたい場合は同じパスにファイルを置いた上で再ビルドする。
+`internal/notifier/sound/assets/default.wav` がバイナリに `//go:embed` で取り込まれており、`wav_path` が空のときはこれを再生する。
 
 ---
 
@@ -279,52 +196,6 @@ Webhook URL はログや表示で自動的にマスクされる。
 | `ccwin config show` | 現在の設定を表示する |
 | `ccwin config path` | 設定ファイルのパスを表示する |
 | `ccwin version` | バージョンを表示する |
-
-### `ccwin init` フラグ
-
-| フラグ | 説明 |
-|-------|------|
-| `--force` | 既存の `config.toml` を確認なしで上書きする |
-| `--path <path>` | 出力先パスを明示指定 |
-| `--log-level <level>` | `debug` / `info` / `warn` / `error` |
-| `--toast <true\|false>` | Toast 通知の ON/OFF |
-| `--sound <true\|false>` | Sound 通知の ON/OFF |
-| `--discord-webhook <url>` | Discord Webhook URL を設定し、`discord.enabled = true` にする |
-| `--slack-webhook <url>` | Slack Webhook URL を設定し、`slack.enabled = true` にする |
-
-フラグを渡さない項目は defaultConfig の値が使われる。`kind_mask` や `dispatcher.notifier_timeout` など細かい設定は TOML を直接編集する。
-
----
-
-## トラブルシューティング
-
-### トースト通知が表示されない
-
-- 設定で `notifiers.toast.enabled = true` になっているか確認
-- Windows の通知設定 (システム → 通知) で通知が許可されているか確認
-- 通知が「PowerShell」名義で表示される場合がある (今後のリリースで改善予定)
-
-### Webhook 通知が届かない
-
-- `notifiers.webhook.*.url` が `https://` で始まる正しい URL になっているか確認
-- ファイアウォール / プロキシが outbound HTTPS を遮断していないか確認
-- `log_level` を `"debug"` にしてデーモンを再起動し、ログでエラー内容を確認
-
-### デーモンが起動できない / "portfile が残っている" 系のエラー
-
-デーモンが異常終了した場合に発生する。次の手順で復旧する。
-
-```powershell
-# portfile を削除
-Remove-Item "$env:APPDATA\ccwin-notify\daemon.port"
-
-# デーモンを再起動
-ccwin daemon
-```
-
-### `subcommand required` と表示されて終了する
-
-`ccwin` を引数なしで実行するとこのメッセージが出る。`daemon` / `init` / `tui` / `config` / `version` のいずれかを必ず指定する。
 
 ---
 
