@@ -2,7 +2,7 @@
 
 Windows版 Claude Codeのhooksは**非常に不安定**で通知を送信するscriptを書いても通知を逃すことが多い。  
 そこで今回の **ccwin-notify** を使用してください。
-ccwin-notify は Claude Code に**依存しない**方法でWindows トースト・通知音などで「完了したよ」を即座に知らせる。
+  ccwin-notify は Claude Code の不安定なhooksの部分に**依存しない**方法でWindows トースト・通知音などで「完了したよ」を即座に知らせる。
 
 ---
 
