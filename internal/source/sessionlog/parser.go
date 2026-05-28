@@ -18,6 +18,11 @@ type lineParseResult struct {
 	Body  string
 }
 
+const (
+	FormatClaude = "claude"
+	FormatCodex  = "codex"
+)
+
 // assistantPayload は jsonl の "assistant" 行の最小スキーマ。
 // 未知フィールドは無視 (encoding/json の既定動作)。
 type assistantPayload struct {
@@ -29,6 +34,19 @@ type assistantPayload struct {
 			Text string `json:"text"`
 		} `json:"content"`
 	} `json:"message"`
+}
+
+type codexPayload struct {
+	Type    string `json:"type"`
+	Payload *struct {
+		Type    string `json:"type"`
+		Role    string `json:"role"`
+		Phase   string `json:"phase"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"payload"`
 }
 
 // parseLine は jsonl 1 行をパースし、Stop event 発火対象かを判定する。
@@ -46,6 +64,10 @@ type assistantPayload struct {
 // PreToolUse hook も組み込み UI パネル (AskUserQuestion / ExitPlanMode) では発火しないため、
 // 即時通知は internal/source/wezterm の `wezterm cli get-text` 経由のターミナル監視で行う。
 func parseLine(line []byte, bodyMaxLen int) (lineParseResult, error) {
+	return parseLineWithFormat(line, bodyMaxLen, FormatClaude)
+}
+
+func parseLineWithFormat(line []byte, bodyMaxLen int, format string) (lineParseResult, error) {
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 {
 		return lineParseResult{}, nil
@@ -53,7 +75,20 @@ func parseLine(line []byte, bodyMaxLen int) (lineParseResult, error) {
 	if bodyMaxLen <= 0 {
 		bodyMaxLen = defaultBodyMaxLen
 	}
+	if format == "" {
+		format = FormatClaude
+	}
+	switch format {
+	case FormatClaude:
+		return parseClaudeLine(trimmed, bodyMaxLen)
+	case FormatCodex:
+		return parseCodexLine(trimmed, bodyMaxLen)
+	default:
+		return lineParseResult{}, nil
+	}
+}
 
+func parseClaudeLine(trimmed []byte, bodyMaxLen int) (lineParseResult, error) {
 	var p assistantPayload
 	if err := json.Unmarshal(trimmed, &p); err != nil {
 		return lineParseResult{}, err
@@ -88,8 +123,34 @@ func parseLine(line []byte, bodyMaxLen int) (lineParseResult, error) {
 	}
 }
 
+func parseCodexLine(trimmed []byte, bodyMaxLen int) (lineParseResult, error) {
+	var p codexPayload
+	if err := json.Unmarshal(trimmed, &p); err != nil {
+		return lineParseResult{}, err
+	}
+	if p.Type != "response_item" || p.Payload == nil {
+		return lineParseResult{}, nil
+	}
+	if p.Payload.Type != "message" || p.Payload.Role != "assistant" || p.Payload.Phase != "final_answer" {
+		return lineParseResult{}, nil
+	}
+	for _, c := range p.Payload.Content {
+		if c.Type == "output_text" && c.Text != "" {
+			return lineParseResult{
+				Fire:  true,
+				Kind:  event.KindStop,
+				Title: codexDefaultTitle,
+				Body:  truncateRunes(c.Text, bodyMaxLen),
+			}, nil
+		}
+	}
+	return lineParseResult{}, nil
+}
+
 // defaultTitle は end_turn 検知時の Toast Title (D-05)。
 const defaultTitle = "Claude finished"
+
+const codexDefaultTitle = "Codex finished"
 
 // truncateRunes は s を rune 単位で n 個に切り詰め、超過時は末尾に "…" を付ける。
 // rune 境界を壊さない (D-13)。

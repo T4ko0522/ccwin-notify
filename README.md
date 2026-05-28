@@ -1,14 +1,14 @@
 # ccwin-notify
 
-**Claude Code (Windows) の "応答完了" を見逃さないための通知デーモン。**
+**Claude Code / Codex (Windows) の "応答完了" を見逃さないための通知デーモン。**
 
-長時間タスクを Claude Code に任せていると、応答が返ってきたことに気付かず時間を無駄にしがち。ccwin-notify は Claude Code の Hooks を受け取り、Windows トースト・通知音・Discord / Slack Webhook で「完了したよ」を即座に知らせる。
+長時間タスクを Claude Code や Codex に任せていると、応答が返ってきたことに気付かず時間を無駄にしがち。ccwin-notify は Claude Code の Hooks と Codex の rollout JSONL を監視し、Windows トースト・通知音・Discord / Slack Webhook で「完了したよ」を即座に知らせる。
 
 ---
 
 ## こんな人向け
 
-- **Windows 10 / 11** で Claude Code を使っている
+- **Windows 10 / 11** で Claude Code または Codex CLI を使っている
 - 長いタスクを投げて別作業をしている間に、応答完了を **トースト / 音 / Discord / Slack** で受け取りたい
 - (任意) **WezTerm** ユーザーで、`AskUserQuestion` や `ExitPlanMode` のような Claude Code の組み込み UI パネルにも即時反応してほしい
 
@@ -18,7 +18,7 @@
 
 ## できること
 
-Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) と sessionlog 監視を組み合わせて、以下を実行する。
+Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`)、Claude sessionlog 監視、Codex rollout JSONL 監視を組み合わせて、以下を実行する。
 
 | 通知先 | 説明 |
 |--------|------|
@@ -35,15 +35,16 @@ Claude Code の Hooks (`Stop` / `Notification` / `SubagentStop`) と sessionlog 
 ## 仕組み (ざっくり)
 
 ```
-Claude Code ──[Hooks]──> ccwin send ──> ccwin daemon ──> Toast / Sound / Webhook
-              (Stop など)                   ▲
-                                            │
-                              WezTerm + sessionlog Source
-                              (AskUserQuestion 等を即時検知)
+Claude Code ──[Hooks]──────> ccwin send ──> ccwin daemon ──> Toast / Sound / Webhook
+              (Stop など)                       ▲
+                                                │
+Claude sessionlog ──────────────────────────────┤
+Codex rollout JSONL ────────────────────────────┘
 ```
 
 - `ccwin daemon` を常駐させておく
 - Claude Code 側から Hook 経由で `ccwin send` を叩く
+- Codex は `sources.codexlog.enabled = true` で `~/.codex/sessions/**/*.jsonl` を監視する
 - daemon が設定に従って各通知先に配信する
 
 ---
@@ -114,6 +115,20 @@ $Input | & "C:\path\to\ccwin.exe" send --kind $Kind --stdin
 ```
 
 これで Claude Code が応答完了したタイミング (`Stop`) などにトースト・音・Webhook が飛ぶ。
+
+### Step 3b. Codex に対応する
+
+Codex CLI は公開設定で Claude Code 相当のイベント Hook を持たないため、ccwin-notify 側で `~/.codex/sessions/**/*.jsonl` の `final_answer` 追記を監視する。`config.toml` に以下を追加して `ccwin daemon` を再起動する。
+
+```toml
+[sources.codexlog]
+enabled = true
+sessions_dir = ""          # 空文字なら %USERPROFILE%\.codex\sessions
+body_max_len = 200
+poll_interval = "1s"
+```
+
+これで Codex が最終応答を書き出したタイミングで `Codex finished` の `Stop` イベントが発火する。途中経過の commentary は通知しない。
 
 ### (任意) ライブログを見る
 
@@ -208,6 +223,7 @@ Start-Process -FilePath $exe -ArgumentList "daemon" -WindowStyle Hidden
 - **OS**: Windows 10 / 11 (64bit) — **Windows 専用**。他 OS では起動しない
 - **ターミナル**: 任意 (Windows Terminal / WezTerm / PowerShell / cmd など)
 - **Claude Code**: v2.1.x で動作確認 (Hooks API + sessionlog 監視)
+- **Codex CLI**: 0.134.0 で動作確認 (`~/.codex/sessions/**/*.jsonl` 監視)
 
 ### WezTerm 限定機能
 
@@ -241,6 +257,12 @@ enabled = true
 enabled = true
 wav_path = ""             # 空文字なら同梱の default.wav を使用、任意の WAV パスを指定すると差し替え
 
+[sources.codexlog]
+enabled = false
+sessions_dir = ""         # 空文字なら %USERPROFILE%\.codex\sessions
+body_max_len = 200
+poll_interval = "1s"
+
 [notifiers.webhook.discord]
 enabled = false
 url = ""                  # https://discord.com/api/webhooks/... を指定
@@ -257,6 +279,8 @@ url = ""                  # https://hooks.slack.com/services/... を指定
 | `notifiers.toast.enabled` | Windows トースト通知の ON/OFF |
 | `notifiers.sound.enabled` | サウンド再生の ON/OFF |
 | `notifiers.sound.wav_path` | WAV ファイルのパス (空なら同梱 WAV) |
+| `sources.codexlog.enabled` | Codex rollout JSONL 監視の ON/OFF |
+| `sources.codexlog.sessions_dir` | Codex sessions ディレクトリ (空なら `%USERPROFILE%\.codex\sessions`) |
 | `notifiers.webhook.discord.url` | Discord Webhook URL (`https://` 必須) |
 | `notifiers.webhook.slack.url` | Slack Webhook URL (`https://` 必須) |
 

@@ -53,6 +53,7 @@ type SourcesConfig struct {
 	Hooks      HooksConfig      `toml:"hooks"`
 	Process    ProcessConfig    `toml:"process"`
 	Sessionlog SessionlogConfig `toml:"sessionlog"`
+	Codexlog   CodexlogConfig   `toml:"codexlog"`
 	Wezterm    WezTermConfig    `toml:"wezterm"`
 }
 
@@ -77,6 +78,17 @@ type SessionlogConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	ProjectsDir string `toml:"projects_dir"`
 	BodyMaxLen  int    `toml:"body_max_len"`
+}
+
+// CodexlogConfig は Codex CLI rollout JSONL 監視ソースの設定。
+// Codex CLI が書き出す ~/.codex/sessions/**/*.jsonl の final_answer 行から
+// Stop イベントを生成する。Codex 0.134.0 時点で Claude Code Hooks 相当の
+// 公開 event hook がないため、永続化ログを監視する。
+type CodexlogConfig struct {
+	Enabled      bool          `toml:"enabled"`
+	SessionsDir  string        `toml:"sessions_dir"`
+	BodyMaxLen   int           `toml:"body_max_len"`
+	PollInterval time.Duration `toml:"poll_interval"`
 }
 
 // WezTermConfig は WezTerm ターミナル監視ソースの設定。
@@ -161,6 +173,13 @@ func defaultConfig() *Config {
 				Enabled:    false,
 				BodyMaxLen: 200,
 			},
+			Codexlog: CodexlogConfig{
+				// Codex CLI のローカル履歴はユーザーごとの環境差があるため既定 disabled。
+				// 利用時は config.toml で enabled=true を明示する。
+				Enabled:      false,
+				BodyMaxLen:   200,
+				PollInterval: time.Second,
+			},
 			Wezterm: WezTermConfig{
 				// WezTerm 専用機能のため既定 disabled。
 				// 利用時は config.toml で enabled=true を明示する。
@@ -244,7 +263,7 @@ func Load(path string) (*Config, error) {
 // ErrInvalidBindAddress は bind_address が 127.0.0.1 以外の場合に返る。
 var ErrInvalidBindAddress = errors.New("config: bind_address must be 127.0.0.1")
 
-// ErrSourcesAllDisabled は Hooks / Process / Sessionlog の全 Source が disabled の場合に返る (A5)。
+// ErrSourcesAllDisabled は全 Source が disabled の場合に返る (A5)。
 var ErrSourcesAllDisabled = errors.New("config: all sources are disabled (no events will be generated)")
 
 // Validate はバインドアドレス / URL HTTPS / 列挙値 / 必須項目をチェック (plan §6.2 全規則)。
@@ -312,6 +331,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: sources.sessionlog.projects_dir must be an absolute path, got %q", dir)
 	}
 
+	if c.Sources.Codexlog.BodyMaxLen < 0 || c.Sources.Codexlog.BodyMaxLen > 4096 {
+		return fmt.Errorf("config: sources.codexlog.body_max_len must be 0..4096, got %d", c.Sources.Codexlog.BodyMaxLen)
+	}
+	if dir := c.Sources.Codexlog.SessionsDir; dir != "" && !filepath.IsAbs(dir) {
+		return fmt.Errorf("config: sources.codexlog.sessions_dir must be an absolute path, got %q", dir)
+	}
+	if c.Sources.Codexlog.PollInterval > 0 && c.Sources.Codexlog.PollInterval < 100*time.Millisecond {
+		return fmt.Errorf("config: sources.codexlog.poll_interval must be >= 100ms, got %v", c.Sources.Codexlog.PollInterval)
+	}
+
 	// sources.wezterm.pane_id: 非負
 	if c.Sources.Wezterm.PaneID < 0 {
 		return fmt.Errorf("config: sources.wezterm.pane_id must be >= 0, got %d", c.Sources.Wezterm.PaneID)
@@ -324,7 +353,7 @@ func (c *Config) Validate() error {
 
 	// A5: 全 Source が disabled の場合はエラー (イベントが生成されない)
 	if !c.Sources.Hooks.Enabled && !c.Sources.Process.Enabled &&
-		!c.Sources.Sessionlog.Enabled && !c.Sources.Wezterm.Enabled {
+		!c.Sources.Sessionlog.Enabled && !c.Sources.Codexlog.Enabled && !c.Sources.Wezterm.Enabled {
 		return ErrSourcesAllDisabled
 	}
 

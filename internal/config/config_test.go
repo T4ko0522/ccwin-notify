@@ -52,6 +52,9 @@ func TestConfig_Load_Default_Values(t *testing.T) {
 	if !cfg.Sources.Hooks.Enabled {
 		t.Error("デフォルト設定: Hooks は enabled であるべき")
 	}
+	if cfg.Sources.Codexlog.Enabled {
+		t.Error("デフォルト設定: Codexlog は disabled であるべき")
+	}
 	// デフォルト: Queue capacity 256
 	if cfg.Queue.Capacity != 256 {
 		t.Errorf("デフォルト Queue Capacity: got %d, want 256", cfg.Queue.Capacity)
@@ -102,6 +105,50 @@ func TestConfig_Validate_NonLoopbackBind(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Error("bind_address=0.0.0.0: Validate はエラーを返すべきだが nil だった")
 	}
+}
+
+func TestConfig_Validate_Codexlog(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enabled as only source passes", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		cfg.Sources.Hooks.Enabled = false
+		cfg.Sources.Process.Enabled = false
+		cfg.Sources.Sessionlog.Enabled = false
+		cfg.Sources.Wezterm.Enabled = false
+		cfg.Sources.Codexlog.Enabled = true
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate: got %v, want nil", err)
+		}
+	})
+
+	t.Run("relative sessions_dir rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		cfg.Sources.Codexlog.SessionsDir = "relative/path"
+		if err := cfg.Validate(); err == nil {
+			t.Error("relative sessions_dir: Validate はエラーを返すべきだが nil だった")
+		}
+	})
+
+	t.Run("short poll interval rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		cfg.Sources.Codexlog.PollInterval = 50 * time.Millisecond
+		if err := cfg.Validate(); err == nil {
+			t.Error("short poll_interval: Validate はエラーを返すべきだが nil だった")
+		}
+	})
 }
 
 // M-03 / A6: bind_address が 127.0.0.2 (loopback だが 127.0.0.1 ではない) なら拒否

@@ -200,6 +200,9 @@ func TestHandleStatus_Fields(t *testing.T) {
 	if _, ok := status.Sources["process"]; !ok {
 		t.Error("sources[process] が存在しない")
 	}
+	if _, ok := status.Sources["codexlog"]; !ok {
+		t.Error("sources[codexlog] が存在しない")
+	}
 	if _, ok := status.Notifiers["toast"]; !ok {
 		t.Error("notifiers[toast] が存在しない")
 	}

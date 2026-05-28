@@ -168,3 +168,84 @@ func TestParseLine(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLineWithFormat_Codex(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		line     string
+		bodyMax  int
+		wantFire bool
+		wantBody string
+		wantErr  bool
+	}{
+		{
+			name:     "assistant final_answer response_item fires",
+			line:     `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}],"phase":"final_answer"}}`,
+			bodyMax:  200,
+			wantFire: true,
+			wantBody: "done",
+		},
+		{
+			name:     "commentary response_item does not fire",
+			line:     `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"working"}],"phase":"commentary"}}`,
+			bodyMax:  200,
+			wantFire: false,
+		},
+		{
+			name:     "event_msg mirror does not fire to avoid duplicates",
+			line:     `{"type":"event_msg","payload":{"type":"agent_message","message":"done","phase":"final_answer"}}`,
+			bodyMax:  200,
+			wantFire: false,
+		},
+		{
+			name:     "user message does not fire",
+			line:     `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}`,
+			bodyMax:  200,
+			wantFire: false,
+		},
+		{
+			name:     "long output truncates",
+			line:     `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + strings.Repeat("a", 20) + `"}],"phase":"final_answer"}}`,
+			bodyMax:  5,
+			wantFire: true,
+			wantBody: "aaaaa…",
+		},
+		{
+			name:    "invalid JSON errors",
+			line:    `{invalid`,
+			bodyMax: 200,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := parseLineWithFormat([]byte(tt.line), tt.bodyMax, FormatCodex)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("err: got nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err: got %v, want nil", err)
+			}
+			if res.Fire != tt.wantFire {
+				t.Errorf("Fire: got %v, want %v", res.Fire, tt.wantFire)
+			}
+			if tt.wantFire {
+				if res.Kind != event.KindStop {
+					t.Errorf("Kind: got %q, want %q", res.Kind, event.KindStop)
+				}
+				if res.Title != codexDefaultTitle {
+					t.Errorf("Title: got %q, want %q", res.Title, codexDefaultTitle)
+				}
+				if res.Body != tt.wantBody {
+					t.Errorf("Body: got %q, want %q", res.Body, tt.wantBody)
+				}
+			}
+		})
+	}
+}

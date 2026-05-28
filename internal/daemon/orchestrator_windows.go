@@ -229,6 +229,27 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		logger.Info("sessionlog source disabled")
 	}
 
+	if cfg.Sources.Codexlog.Enabled {
+		cxSrc := sessionlog.New(busPublisher{bus: bus, accept: acceptCtx}, sessionlog.Config{
+			ProjectsDir:  cfg.Sources.Codexlog.SessionsDir,
+			BodyMaxLen:   cfg.Sources.Codexlog.BodyMaxLen,
+			PollInterval: cfg.Sources.Codexlog.PollInterval,
+			Format:       sessionlog.FormatCodex,
+			SourceName:   "codexlog",
+		}, logger)
+		go func() {
+			if err := cxSrc.Run(acceptCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("codexlog source: Run exited", "err", err)
+			}
+		}()
+		logger.Info("codexlog source enabled",
+			"sessions_dir", cfg.Sources.Codexlog.SessionsDir,
+			"body_max_len", cfg.Sources.Codexlog.BodyMaxLen,
+			"poll_interval", cfg.Sources.Codexlog.PollInterval)
+	} else {
+		logger.Info("codexlog source disabled")
+	}
+
 	// step 13.8: WezTerm ターミナル監視ソース (AskUserQuestion / ExitPlanMode の即時検知)
 	if cfg.Sources.Wezterm.Enabled {
 		wtSrc := wezterm.New(busPublisher{bus: bus, accept: acceptCtx}, wezterm.Config{

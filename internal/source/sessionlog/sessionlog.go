@@ -1,9 +1,8 @@
-// Package sessionlog は Claude Code のセッションログ (jsonl) を fsnotify で監視し、
-// アシスタント応答の終了 (stop_reason in {end_turn, stop_sequence}) を検知して
-// event.KindStop を Bus に Publish するソース実装。
+// Package sessionlog は Claude Code / Codex のセッションログ (jsonl) を fsnotify で監視し、
+// アシスタント応答の終了を検知して event.KindStop を Bus に Publish するソース実装。
 //
-// Hooks 経路 (settings.json) に依存せず、Claude Code core が必ず書き出す
-// 永続化ログを直接観測することで、ターン終了通知の信頼性を確保する。
+// Hooks 経路に依存せず、各 CLI が書き出す永続化ログを直接観測することで、
+// ターン終了通知の信頼性を確保する。
 package sessionlog
 
 import (
@@ -55,8 +54,9 @@ type Watcher interface {
 
 // Config は Source の挙動を制御する設定。
 type Config struct {
-	// ProjectsDir は監視する Claude Code projects ディレクトリ。
-	// 空のとき $USERPROFILE/.claude/projects を既定値とする。
+	// ProjectsDir は監視する JSONL ルートディレクトリ。
+	// Format=claude かつ空のとき $USERPROFILE/.claude/projects を既定値とする。
+	// Format=codex かつ空のとき $USERPROFILE/.codex/sessions を既定値とする。
 	ProjectsDir string
 	// BodyMaxLen は event.Body の truncate 長 (rune 単位)。<=0 はデフォルト 200。
 	BodyMaxLen int
@@ -64,6 +64,10 @@ type Config struct {
 	// Claude Code が tool_use 行を書いた直後にバッファを flush しないため
 	// fsnotify Write が遅延するケースがあり、これを polling で補う (出した瞬間に検知できるように)。
 	PollInterval time.Duration
+	// Format は JSONL のスキーマ。空なら claude。
+	Format string
+	// SourceName は発火イベントの Source。空なら sessionlog。
+	SourceName string
 	// NewWatcher が nil なら fsnotify ベースの実装が使われる (D-09 テスト容易性)。
 	NewWatcher func() (Watcher, error)
 }
@@ -80,7 +84,7 @@ type Source struct {
 
 // New は Source を生成する。
 // cfg のフィールドが未指定なら以下の既定値を適用:
-//   - ProjectsDir 空: $USERPROFILE/.claude/projects
+//   - ProjectsDir 空: format に応じて $USERPROFILE/.claude/projects または $USERPROFILE/.codex/sessions
 //   - BodyMaxLen <=0: 200
 //   - NewWatcher nil: fsnotify ベース実装
 func New(publisher EventPublisher, cfg Config, logger *slog.Logger) *Source {
@@ -93,9 +97,20 @@ func New(publisher EventPublisher, cfg Config, logger *slog.Logger) *Source {
 	if cfg.NewWatcher == nil {
 		cfg.NewWatcher = newFsnotifyWatcher
 	}
+	if cfg.Format == "" {
+		cfg.Format = FormatClaude
+	}
+	if cfg.SourceName == "" {
+		cfg.SourceName = "sessionlog"
+	}
 	if cfg.ProjectsDir == "" {
 		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			cfg.ProjectsDir = filepath.Join(home, ".claude", "projects")
+			switch cfg.Format {
+			case FormatCodex:
+				cfg.ProjectsDir = filepath.Join(home, ".codex", "sessions")
+			default:
+				cfg.ProjectsDir = filepath.Join(home, ".claude", "projects")
+			}
 		}
 	}
 	if logger == nil {
@@ -194,32 +209,46 @@ func (s *Source) initialScan(w Watcher) {
 	}
 	for _, ent := range entries {
 		if !ent.IsDir() {
-			continue
-		}
-		sub := filepath.Join(s.cfg.ProjectsDir, ent.Name())
-		if err := w.Add(sub); err != nil {
-			s.logger.Warn("sessionlog source: add subdir failed",
-				"dir", sub, "err", err.Error())
-			continue
-		}
-		files, err := os.ReadDir(sub)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
+			if strings.HasSuffix(ent.Name(), ".jsonl") {
+				fpath := filepath.Join(s.cfg.ProjectsDir, ent.Name())
+				s.trackExistingFile(fpath)
 			}
-			fpath := filepath.Join(sub, f.Name())
-			st, err := os.Stat(fpath)
-			if err != nil {
-				continue
-			}
-			s.mu.Lock()
-			s.offsets[fpath] = st.Size()
-			s.mu.Unlock()
+			continue
 		}
+		s.addDirTree(w, filepath.Join(s.cfg.ProjectsDir, ent.Name()))
 	}
+}
+
+func (s *Source) addDirTree(w Watcher, root string) {
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if err := w.Add(path); err != nil {
+				s.logger.Warn("sessionlog source: add subdir failed",
+					"dir", path, "err", err.Error())
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".jsonl") {
+			s.trackExistingFile(path)
+		}
+		return nil
+	})
+	if err != nil {
+		s.logger.Warn("sessionlog source: walk dir failed", "dir", root, "err", err.Error())
+	}
+}
+
+func (s *Source) trackExistingFile(path string) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.offsets[path] = st.Size()
+	s.mu.Unlock()
 }
 
 // handleEvent は 1 件の WatchEvent を処理する。
@@ -231,10 +260,7 @@ func (s *Source) handleEvent(ctx context.Context, w Watcher, ev WatchEvent) {
 	// Create 経由でディレクトリが現れたら Watcher.Add
 	if ev.Op&OpCreate != 0 {
 		if info, err := os.Stat(ev.Path); err == nil && info.IsDir() {
-			if err := w.Add(ev.Path); err != nil {
-				s.logger.Warn("sessionlog source: add new subdir failed",
-					"dir", ev.Path, "err", err.Error())
-			}
+			s.addDirTree(w, ev.Path)
 			return
 		}
 	}
@@ -374,7 +400,7 @@ func (s *Source) readNewLines(ctx context.Context, path string) {
 		if trimmed == "" {
 			continue
 		}
-		res, perr := parseLine([]byte(trimmed), s.cfg.BodyMaxLen)
+		res, perr := parseLineWithFormat([]byte(trimmed), s.cfg.BodyMaxLen, s.cfg.Format)
 		if perr != nil {
 			s.logger.Debug("sessionlog source: parse failed",
 				"path", path, "err", perr.Error())
@@ -388,7 +414,7 @@ func (s *Source) readNewLines(ctx context.Context, path string) {
 			Kind:      res.Kind,
 			Title:     res.Title,
 			Body:      res.Body,
-			Source:    "sessionlog",
+			Source:    s.cfg.SourceName,
 			Timestamp: time.Now(),
 		}
 		s.logger.Info("sessionlog source: publish",

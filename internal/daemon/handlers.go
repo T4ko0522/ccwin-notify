@@ -60,6 +60,18 @@ func HandleStatus(d *Dispatcher, bus event.Bus, sseHub *sse.Hub, cfg *config.Con
 				Enabled: cfg.Sources.Process.Enabled,
 				State:   stateString(cfg.Sources.Process.Enabled),
 			},
+			"sessionlog": {
+				Enabled: cfg.Sources.Sessionlog.Enabled,
+				State:   stateString(cfg.Sources.Sessionlog.Enabled),
+			},
+			"codexlog": {
+				Enabled: cfg.Sources.Codexlog.Enabled,
+				State:   stateString(cfg.Sources.Codexlog.Enabled),
+			},
+			"wezterm": {
+				Enabled: cfg.Sources.Wezterm.Enabled,
+				State:   stateString(cfg.Sources.Wezterm.Enabled),
+			},
 		}
 
 		// Notifiers stat

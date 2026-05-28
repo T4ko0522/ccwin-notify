@@ -85,6 +85,7 @@ const (
 	toolUseLine = `{"type":"assistant","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"x"}]}}`
 	userLine    = `{"type":"user","message":{"role":"user"}}`
 	badLine     = `not a json`
+	codexFinal  = `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex done"}],"phase":"final_answer"}}`
 )
 
 // waitForEventCount は publisher の Event 数が n 件になるまで最大 d 待つ。到達しなければ fail。
@@ -134,6 +135,117 @@ func TestSource_InitialFiles_DoNotFire(t *testing.T) {
 
 	if got := len(pub.Events()); got != 0 {
 		t.Errorf("初期既存ファイルから発火された: %d 件 (want 0)", got)
+	}
+}
+
+func TestSource_CodexNestedSession_FiresOnAppend(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	dayDir := filepath.Join(sessionsDir, "2026", "05", "29")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := filepath.Join(dayDir, "rollout.jsonl")
+	if err := os.WriteFile(jsonl, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pub := &fakePublisher{}
+	w := newInMemoryWatcher()
+	src := sessionlog.New(pub, sessionlog.Config{
+		ProjectsDir:  sessionsDir,
+		Format:       sessionlog.FormatCodex,
+		SourceName:   "codexlog",
+		NewWatcher:   func() (sessionlog.Watcher, error) { return w, nil },
+		PollInterval: time.Hour,
+	}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = src.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	f, err := os.OpenFile(jsonl, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(codexFinal + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	w.fireEvent(jsonl, sessionlog.OpWrite)
+
+	events := waitForEventCount(t, pub, 1, time.Second)
+	if len(events) != 1 {
+		t.Fatalf("events: got %d, want 1", len(events))
+	}
+	if events[0].Source != "codexlog" {
+		t.Errorf("Source: got %q, want codexlog", events[0].Source)
+	}
+	if events[0].Title != "Codex finished" {
+		t.Errorf("Title: got %q, want Codex finished", events[0].Title)
+	}
+	if events[0].Body != "codex done" {
+		t.Errorf("Body: got %q, want codex done", events[0].Body)
+	}
+}
+
+func TestSource_CodexRealWatcherAndPolling_FiresOnAppend(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	dayDir := filepath.Join(sessionsDir, "2026", "05", "29")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := filepath.Join(dayDir, "rollout.jsonl")
+	if err := os.WriteFile(jsonl, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pub := &fakePublisher{}
+	src := sessionlog.New(pub, sessionlog.Config{
+		ProjectsDir:  sessionsDir,
+		Format:       sessionlog.FormatCodex,
+		SourceName:   "codexlog",
+		PollInterval: 100 * time.Millisecond,
+	}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = src.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	f, err := os.OpenFile(jsonl, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(codexFinal + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	events := waitForEventCount(t, pub, 1, 2*time.Second)
+	if len(events) != 1 {
+		t.Fatalf("events: got %d, want 1", len(events))
+	}
+	if events[0].Source != "codexlog" || events[0].Title != "Codex finished" || events[0].Body != "codex done" {
+		t.Fatalf("event: got %+v", events[0])
 	}
 }
 
